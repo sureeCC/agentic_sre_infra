@@ -1,0 +1,23 @@
+kind: hosted
+name: sre-alert-postgres-hosted
+protocols:
+  - protocol: responses
+    version: 2.0.0
+resources:
+  cpu: "0.25"
+  memory: "0.5Gi"
+environment_variables:
+  - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+    value: alert-agent-mini
+  - name: POSTGRES_HOST
+    value: pg-agenticsre-poc-244b.postgres.database.azure.com
+  - name: POSTGRES_DATABASE
+    value: agenticsre
+  - name: POSTGRES_AAD_USER
+    value: sre-alert-postgres-hosted
+code_configuration:
+  runtime: python_3_13
+  entry_point:
+    - python
+    - main.py
+  dependency_resolution: remote_build

@@ -15,6 +15,12 @@ tfplan-*
 environments/poc/.git.local-backup/
 .local-agentic_sre_infra-backup/
 
+# Application source: never commit local settings, build output, or artifacts.
+applications/**/bin/
+applications/**/obj/
+applications/**/*.zip
+applications/**/local.settings.json
+
 # Variable and backend files can contain tenant, subscription, or secret values
 *.tfvars
 *.tfvars.json

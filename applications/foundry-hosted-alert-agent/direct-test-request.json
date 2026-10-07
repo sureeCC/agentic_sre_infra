@@ -1,0 +1,10 @@
+{
+  "model": "alert-agent-mini",
+  "input": [
+    {
+      "role": "user",
+      "content": "{\"source\":\"hosted-agent-direct-test\",\"message\":\"Test alert from direct Hosted Agent validation\",\"severity\":\"warning\",\"timestamp\":\"2026-10-07T05:20:00Z\"}"
+    }
+  ],
+  "stream": false
+}
