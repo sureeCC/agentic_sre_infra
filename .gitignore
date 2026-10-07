@@ -21,6 +21,11 @@ applications/**/obj/
 applications/**/*.zip
 applications/**/local.settings.json
 
+# CI packages and Python validation output
+dist/
+__pycache__/
+*.pyc
+
 # Variable and backend files can contain tenant, subscription, or secret values
 *.tfvars
 *.tfvars.json

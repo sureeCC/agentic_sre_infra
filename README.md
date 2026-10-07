@@ -1,5 +1,12 @@
 # Agentic SRE Terraform
 
+## CI/CD pipelines
+
+Three independent GitHub Actions workflows are available for controlled POC
+Terraform plan/apply, Function App deployment, and Foundry hosted-agent
+deployment. See [the setup and deployment runbook](docs/pipelines.md) for OIDC,
+protected environments, required variables/secrets, and deployment order.
+
 This directory is the infrastructure-as-code foundation for the production-grade
 Kibana -> Azure Functions -> Event Hubs -> Foundry Hosted Agent -> PostgreSQL
 architecture.
