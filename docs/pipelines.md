@@ -65,6 +65,16 @@ provider lock file and backend. A future production rollout must use a distinct 
 production composition mirrors POC; keep shared infrastructure changes in `modules/` and
 review changes to both root compositions together.
 
+The lock files must contain hashes for the Linux CI runner as well as Windows
+development. After changing provider versions, run this from each affected root
+and commit the resulting lock file:
+
+```powershell
+terraform providers lock -platform=linux_amd64 -platform=windows_amd64
+```
+
+CI deliberately keeps `-lockfile=readonly` so dependency changes require review.
+
 Set these variables identically in **both** Terraform environments:
 
 | Variable | Purpose |
