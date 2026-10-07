@@ -1,0 +1,24 @@
+# Terraform working directories and state
+.terraform/
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+*.tfplan.*
+terraform.zip
+plan-check-*.txt
+tfplan-*
+
+# Local Git metadata backups retained during repository consolidation.
+environments/poc/.git.local-backup/
+.local-agentic_sre_infra-backup/
+
+# Variable and backend files can contain tenant, subscription, or secret values
+*.tfvars
+*.tfvars.json
+backend.hcl
+
+# Keep the dependency lock file in source control
+!.terraform.lock.hcl

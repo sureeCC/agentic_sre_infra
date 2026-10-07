@@ -1,0 +1,95 @@
+# Copy to terraform.tfvars locally. Do not commit the copied file.
+subscription_id     = "00000000-0000-0000-0000-000000000000"
+tenant_id           = "00000000-0000-0000-0000-000000000000"
+resource_group_name = "test"
+location            = "westus"
+environment         = "poc"
+owner               = "platform-engineering"
+cost_center         = "sre-poc"
+data_classification = "internal"
+
+additional_tags = {
+  application = "agentic-sre"
+  lifecycle   = "experimental"
+}
+
+# Use a globally unique namespace name. Existing POC resources must be imported,
+# not recreated. The POC currently uses pocagenticsre / testeventhub.
+event_hubs_namespace_name                 = "ehns-agenticsre-poc-example"
+event_hubs_sku                            = "Standard"
+event_hubs_capacity                       = 1
+event_hubs_auto_inflate_enabled           = false
+event_hubs_maximum_throughput_units       = 4
+event_hubs_public_network_access_enabled  = true
+
+event_hubs = {
+  "testeventhub" = {
+    partition_count        = 2
+    message_retention_days = 1
+    consumer_groups        = ["foundry-agent-dispatcher"]
+  }
+}
+
+# Function hosting and managed-identity dispatch. Function code is deployed by
+# CI/CD after infrastructure review and apply.
+function_app_name                 = "func-agenticsre-poc-example"
+function_service_plan_name        = "plan-agenticsre-poc-example"
+function_service_plan_sku         = "EP1"
+function_storage_account_name     = "stagenticsrepoc1234"
+function_storage_replication_type = "ZRS"
+application_insights_name         = "appi-agenticsre-poc-example"
+function_event_hub_name           = "testeventhub"
+function_event_hub_consumer_group = "foundry-agent-dispatcher"
+
+# These values are non-secret. The Foundry resource ID is added after the
+# Foundry layer is imported or provisioned.
+foundry_project_endpoint = "https://<foundry-resource>.services.ai.azure.com/api/projects/<project-name>"
+foundry_alert_agent_name = "sre-alert-postgres-hosted"
+
+# Foundry resource and model deployment. Start with create_model_deployment =
+# false when taking ownership of the existing POC; import it before enabling a
+# plan. Confirm model availability and quota in the target region first.
+foundry_resource_name            = "agenticsre-poc-example"
+foundry_custom_subdomain_name    = "agenticsre-poc-example"
+foundry_sku_name                 = "S0"
+foundry_create_model_deployment  = false
+foundry_model_deployment_name    = "alert-agent-mini"
+foundry_model_format             = "OpenAI"
+foundry_model_name               = "gpt-4.1-mini"
+foundry_model_version            = "2025-04-14"
+foundry_model_sku_name           = "GlobalStandard"
+foundry_model_sku_capacity       = 1
+
+# Microsoft Entra application registrations. Generate the UUID once with
+# `New-Guid`, then retain it forever to avoid changing a deployed app-role ID.
+function_api_display_name   = "agentic-sre-alert-api"
+function_api_identifier_uri = "api://agenticsre-alert-api-poc-example"
+kibana_client_display_name  = "kibana-alerting-client"
+kibana_alert_send_role_id   = "11111111-2222-3333-4444-555555555555"
+
+# PostgreSQL uses Microsoft Entra-only authentication. No administrator password
+# is configured or stored. Use a security group as the Entra administrator.
+postgresql_server_name                         = "pg-agenticsre-poc-example"
+postgresql_sku_name                            = "B_Standard_B1ms"
+postgresql_version                             = "16"
+postgresql_storage_mb                          = 32768
+postgresql_backup_retention_days               = 7
+postgresql_geo_redundant_backup_enabled        = false
+postgresql_high_availability_enabled           = false
+postgresql_public_network_access_enabled       = true
+postgresql_database_name                       = "agenticsre"
+postgresql_entra_administrator_object_id       = "00000000-0000-0000-0000-000000000000"
+postgresql_entra_administrator_principal_name  = "agenticsre-postgresql-admins"
+postgresql_entra_administrator_principal_type  = "Group"
+
+# Remove public rules and set public_network_access_enabled = false after
+# private endpoint and private DNS Terraform modules are added.
+postgresql_firewall_rules = {
+  "temporary-azure-services" = {
+    start_ip_address = "0.0.0.0"
+    end_ip_address   = "0.0.0.0"
+  }
+}
+
+# Set after a central Log Analytics workspace is provisioned.
+# log_analytics_workspace_id = "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<name>"

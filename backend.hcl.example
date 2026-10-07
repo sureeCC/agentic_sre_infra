@@ -1,0 +1,12 @@
+# Store this configuration outside source control as backend.hcl.
+# The storage account must be in a dedicated Terraform state resource group.
+resource_group_name  = "test"
+storage_account_name = "sttfstateexample"
+container_name       = "tfstate"
+key                  = "agentic-sre/poc.tfstate"
+
+# Local VS Code authentication: use your pre-authenticated Azure CLI session.
+# CI/CD should use a separate OIDC backend configuration; do not add a secret.
+use_azuread_auth = true
+use_cli          = true
+tenant_id        = "89c39546-9370-4770-a920-ea7f83a9c45e"
