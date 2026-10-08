@@ -1,5 +1,11 @@
 # Agentic SRE Terraform
 
+## Terragrunt configuration
+
+A separate [Terragrunt layout](terragrunt/README.md) provides shared root/common
+configuration and one unit per existing module for POC and production. Read its
+state ownership migration instructions before using it for existing resources.
+
 ## CI/CD pipelines
 
 Three independent GitHub Actions workflows are available for controlled POC

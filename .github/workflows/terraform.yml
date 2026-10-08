@@ -1,10 +1,17 @@
-name: Terraform POC
+name: Terragrunt POC
 
 on:
+  push:
+    branches: [main]
+    paths: ['terragrunt/**', 'modules/**', 'scripts/ci/**', '.github/workflows/terraform.yml']
   pull_request:
-    paths: ['environments/**', 'modules/**', 'scripts/ci/*plan*', 'scripts/ci/terraform-init.sh', '.github/workflows/terraform.yml']
+    paths: ['terragrunt/**', 'modules/**', 'scripts/ci/**', '.github/workflows/terraform.yml']
   workflow_dispatch:
     inputs:
+      run_plan:
+        description: Plan existing POC resources after state ownership migration
+        type: boolean
+        default: false
       allow_deletions:
         description: Allow reviewed deletes or replacements
         type: boolean
@@ -14,20 +21,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: terraform-poc
+  group: terragrunt-poc
   cancel-in-progress: false
 
 env:
   TF_IN_AUTOMATION: 'true'
   TF_INPUT: 'false'
-  ARM_USE_OIDC: 'true'
-  ARM_USE_AZUREAD: 'true'
-  TF_ROOT: environments/poc
+  TG_TF_PATH: terraform
 
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -36,12 +41,19 @@ jobs:
         with:
           terraform_version: 1.9.8
           terraform_wrapper: false
-      - run: terraform fmt -check -recursive
-      - run: terraform init -backend=false -input=false -lockfile=readonly && terraform validate
-        working-directory: environments/poc
+      - name: Install checksum-verified Terragrunt 1.1.6
+        run: bash scripts/ci/install-terragrunt.sh
+      - name: Check Terragrunt formatting
+        run: terragrunt hcl fmt --check --working-dir terragrunt
+      - name: Validate all POC and production units without Azure
+        shell: pwsh
+        run: |
+          $env:TF_PLUGIN_CACHE_DIR = Join-Path $env:RUNNER_TEMP 'terraform-provider-cache'
+          New-Item -ItemType Directory -Path $env:TF_PLUGIN_CACHE_DIR -Force | Out-Null
+          ./terragrunt/scripts/validate.ps1 -ValidateTerraform
 
   plan:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.run_plan
     needs: validate
     environment: terraform-plan-poc
     runs-on: ubuntu-24.04
@@ -49,20 +61,19 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    outputs:
-      changes: ${{ steps.plan.outputs.changes }}
     env:
+      ARM_USE_OIDC: 'true'
+      ARM_USE_AZUREAD: 'true'
+      TG_USE_OIDC: 'true'
       ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      TF_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
-      TF_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
-      TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
-      TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
-    defaults:
-      run:
-        shell: bash
-        working-directory: environments/poc
+      TG_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+      TG_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+      TG_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+      TG_STATE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TG_STATE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ALLOW_DELETIONS: ${{ inputs.allow_deletions }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -71,92 +82,25 @@ jobs:
         with:
           terraform_version: 1.9.8
           terraform_wrapper: false
-      - name: Initialize OIDC backend
-        run: bash ../../scripts/ci/terraform-init.sh
-      - name: Use versioned POC configuration
-        run: test -f terraform.tfvars
-      - name: Create saved plan
-        id: plan
-        run: |
-          set +e
-          terraform plan -input=false -lock-timeout=5m -detailed-exitcode -out=tfplan
-          result=$?
-          set -e
-          if [ "$result" -eq 1 ]; then exit 1; fi
-          if [ "$result" -ne 0 ] && [ "$result" -ne 2 ]; then exit "$result"; fi
-          echo "changes=$result" >> "$GITHUB_OUTPUT"
-      - name: Check deletion policy and summarize
-        env:
-          ALLOW_DELETIONS: ${{ inputs.allow_deletions }}
-        run: |
-          terraform show -json tfplan | jq -e \
-            --arg subscription "$ARM_SUBSCRIPTION_ID" --arg tenant "$ARM_TENANT_ID" \
-            '.variables.environment.value == "poc" and .variables.subscription_id.value == $subscription and .variables.tenant_id.value == $tenant' > /dev/null
-          terraform show -json tfplan | python ../../scripts/ci/check-plan.py
-      - name: Encrypt saved plan
-        if: steps.plan.outputs.changes == '2'
+      - name: Install checksum-verified Terragrunt 1.1.6
+        run: bash scripts/ci/install-terragrunt.sh
+      - name: Verify migrated state and plan all six POC units
+        run: bash scripts/ci/terragrunt-plan.sh
+      - name: Encrypt saved plans
         env:
           TF_PLAN_KEY: ${{ secrets.TF_PLAN_KEY }}
         run: |
           test -n "$TF_PLAN_KEY"
-          sha256sum tfplan > tfplan.sha256
-          tar -czf plan.tar.gz tfplan tfplan.sha256
+          tar -czf plan.tar.gz -C plan-artifacts .
           openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass env:TF_PLAN_KEY -in plan.tar.gz -out plan.enc
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: steps.plan.outputs.changes == '2'
         with:
-          name: terraform-plan-${{ github.run_id }}
-          path: environments/poc/plan.enc
+          name: terragrunt-plan-${{ github.run_id }}
+          path: plan.enc
           retention-days: 1
           if-no-files-found: error
-      - name: Remove plaintext files
+      - name: Remove plaintext plans
         if: always()
-        run: rm -f tfplan tfplan.sha256 plan.tar.gz
+        run: rm -rf plan-artifacts plan.tar.gz
 
-  apply:
-    needs: plan
-    # Disabled while infrastructure plans are being reviewed.
-    if: ${{ false }}
-    environment: terraform-poc
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      TF_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
-      TF_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
-      TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
-      TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
-    defaults:
-      run:
-        shell: bash
-        working-directory: environments/poc
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
-        with:
-          terraform_version: 1.9.8
-          terraform_wrapper: false
-      - run: bash ../../scripts/ci/terraform-init.sh
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: terraform-plan-${{ github.run_id }}
-          path: environments/poc
-      - name: Apply the reviewed plan
-        env:
-          TF_PLAN_KEY: ${{ secrets.TF_PLAN_KEY }}
-        run: |
-          test -n "$TF_PLAN_KEY"
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TF_PLAN_KEY -in plan.enc -out plan.tar.gz
-          tar -xzf plan.tar.gz
-          sha256sum -c tfplan.sha256
-          terraform apply -input=false -lock-timeout=5m tfplan
-      - name: Remove plaintext plan
-        if: always()
-        run: rm -f tfplan tfplan.sha256 plan.tar.gz
+  # Apply remains disabled during state migration. No deployment job is present.

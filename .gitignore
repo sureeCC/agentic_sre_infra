@@ -35,3 +35,14 @@ backend.hcl
 
 # Keep the dependency lock file in source control
 !.terraform.lock.hcl
+
+# Terragrunt caches, generated files, and local validation tools
+.terragrunt-cache/
+terragrunt/.tools/
+terragrunt-providers.tf
+terragrunt-backend.tf
+
+# Saved Terragrunt plans and encrypted CI packages
+plan-artifacts/
+plan.enc
+plan.tar.gz

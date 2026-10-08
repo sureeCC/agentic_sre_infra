@@ -1,21 +1,21 @@
 # GitHub Actions deployment runbook
 
-Three independent workflows validate pull requests and deploy only through a
+Three independent workflows validate pull requests. Infrastructure validation also runs on pushes to main. Application workflows deploy only through a
 manual **Run workflow** on `main`. No push triggers deployment. Deployments use
 Azure OIDC, SHA-pinned actions, job timeouts, and workflow concurrency. Configure
 the controls below before the first deployment run; workflow files cannot create
 GitHub environment reviewers or Azure federated credentials themselves.
 
-Terraform currently validates and plans only: its apply job is unconditionally
-disabled. Function App and hosted agent deployment workflows are unchanged.
+Terragrunt currently validates and optionally plans only; it has no apply job. Function App and hosted agent deployment workflows are unchanged.
 
 ## Active deployment target
 
-The workflows currently target the existing POC resources in resource group `test`.
-Use the existing backend key `agentic-sre/poc.tfstate` and the existing POC variable values.
-The separate `environments/prod` root is reserved for a future production rollout.
-Terraform automatically loads the versioned `environments/poc/terraform.tfvars`.
-It contains non-secret POC values; the example is only a field reference.
+The workflows target the existing POC resources in resource group `test`.
+Infrastructure now uses `terragrunt/environments/poc`, with inputs in each unit's
+`terragrunt.hcl` and shared values in `common.hcl`. CI does not load `.tfvars`.
+The old combined state key `agentic-sre/poc.tfstate` must be migrated into six
+unit states before live planning. See [Terragrunt migration instructions](../terragrunt/README.md).
+Production receives offline validation only; its real rollout needs reviewed values.
 
 ## GitHub environments and Azure identities
 
@@ -61,69 +61,55 @@ identity's object ID as owner. With separate plan/apply identities, explicitly
 set it to `false` and manage owners through a reviewed Entra process, or give the
 apply identity sufficient directory rights independently of ownership.
 
-## 1. Terraform POC
+## 1. Terragrunt POC
 
-Workflow: `.github/workflows/terraform.yml`.
-Root: `environments/poc`, reusing the existing modules. The workflow uses the existing POC
-provider lock file and backend. A future production rollout must use a distinct state key. The
-production composition mirrors POC; keep shared infrastructure changes in `modules/` and
-review changes to both root compositions together.
+Workflow: `.github/workflows/terraform.yml`, displayed as **Terragrunt POC**.
+Terraform 1.9.8 executes beneath checksum-verified Terragrunt 1.1.6.
 
-The lock files must contain hashes for the Linux CI runner as well as Windows
-development. After changing provider versions, run this from each affected root
-and commit the resulting lock file:
+Pushes to `main`, relevant pull requests, and manual runs check HCL formatting
+and all 12 POC/production units. Validation copies the configuration to a
+temporary directory, uses synthetic dependency outputs, initializes providers
+with `-backend=false -lockfile=readonly`, and runs `terragrunt validate`.
+It needs no Azure login, remote state, or production variables. The normal unit
+configuration permits placeholders only for validation, never live planning.
+Each unit's committed lock file includes Windows and Linux provider checksums.
+Update locks deliberately with `terragrunt providers lock
+-platform=linux_amd64 -platform=windows_amd64` from each unit.
 
-```powershell
-terraform providers lock -platform=linux_amd64 -platform=windows_amd64
-```
-
-CI deliberately keeps `-lockfile=readonly` so dependency changes require review.
-
-Set these variables identically in **both** Terraform environments:
+Set these variables in the existing **terraform-plan-poc** GitHub environment:
 
 | Variable | Purpose |
 |---|---|
-| `TF_STATE_RESOURCE_GROUP` | Bootstrapped state resource group |
-| `TF_STATE_STORAGE_ACCOUNT` | Dedicated state storage account |
-| `TF_STATE_CONTAINER` | Existing private blob container |
-| `TF_STATE_KEY` | Existing POC key: `agentic-sre/poc.tfstate` |
+| `AZURE_CLIENT_ID` | OIDC planning identity |
+| `AZURE_TENANT_ID` | POC tenant |
+| `AZURE_SUBSCRIPTION_ID` | POC subscription and state subscription |
+| `TF_STATE_RESOURCE_GROUP` | Existing state resource group |
+| `TF_STATE_STORAGE_ACCOUNT` | Existing state storage account |
+| `TF_STATE_CONTAINER` | Existing state container |
 
-Use Entra access to state; disable anonymous access, enable blob versioning and
-soft delete, and restrict state access to the deployment identities/operators.
-If state is private, replace `ubuntu-24.04` with a trusted runner that has the
-required network path. A future production environment must not share POC state.
+The workflow maps existing `TF_STATE_*` variables to Terragrunt's `TG_STATE_*`
+variables. `TF_STATE_KEY` and `TFVARS_JSON` are no longer used. State keys are
+`agentic-sre/terragrunt/environments/poc/UNIT/terraform.tfstate`.
+Set the `TF_PLAN_KEY` secret to encrypt saved plans before artifact upload.
 
-Review changes to `environments/poc/terraform.tfvars` in source control. Retain
-the existing names, subscription/tenant IDs, Windows Function OS, consumer group,
-model, project endpoint, database administrator, and reviewed firewall rules.
-Keep credentials and secrets out of this file. `TFVARS_JSON` is no longer used
-by the workflow. The example is not an import-ready configuration. The plan job
-checks that the POC tenant/subscription match its configured Azure identity.
+To check CI before migration, push the change or manually run the workflow with
+**run_plan unchecked**. To review a live plan, migrate ownership of every managed
+resource instance, then run on `main` with **run_plan checked**. The plan job
+uses OIDC, rejects unit states without managed resources, runs the six units in
+dependency order, verifies the Azure tenant/subscription in each JSON plan, and
+summarizes actions using the existing deletion policy. Nonempty state is an early
+migration check, not proof that every resource was migrated; operators must
+reconcile all resource instances against the original state.
 
-Set the same strong random `TF_PLAN_KEY` **secret** in both Terraform
-environments. For example, generate one offline with `openssl rand -base64 48`.
-This encrypts the saved plan before artifact upload. Only the encrypted plan is
-retained, for one day; do not rotate this key between plan and apply jobs.
+Saved binary and JSON plans are encrypted and retained for one day. Plaintext
+plans are removed afterward. There is no apply job, automatic import, or state
+migration in this workflow. Do not run the old combined Terraform pipeline
+against resources owned by the Terragrunt unit states. Re-enabling deployment
+requires a reviewed change that applies the exact saved per-unit plans after
+GitHub environment approval.
 
-Run the workflow on `main`. It validates, initializes the OIDC backend, locks
-state, creates a saved plan, summarizes action counts, and rejects resource
-deletes/replacements unless `allow_deletions` was explicitly selected. Review
-the complete plan in the plan job log. The apply job always skips, including
-when changes are detected. Re-enabling it requires a reviewed workflow change
-to restore its condition to `needs.plan.outputs.changes == '2'`. When enabled,
-apply downloads the artifact from that same run, verifies its decrypted SHA256,
-and applies that exact saved plan without replanning after environment approval.
-Drift that makes the plan stale must result in a fresh run and fresh review.
-
-For existing resources, import them through a reviewed operator process before
-running this workflow. The existing POC import script targets POC and must not
-be used against production. There is no destroy or automatic import pipeline.
-
-The production root does not itself complete private networking, Key Vault,
-Foundry project creation, Easy Auth configuration, or database migrations.
-These are existing infrastructure gaps; the pipeline does not make the current
-infrastructure production-ready by itself. Review availability, backups,
-public access, and identity settings in production variables before applying.
+Private networking, Easy Auth, Foundry projects, and database role/bootstrap
+steps remain prerequisites described in the Terragrunt and application runbooks.
 
 ## 2. Function App
 
