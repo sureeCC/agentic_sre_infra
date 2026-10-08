@@ -73,16 +73,8 @@ jobs:
           terraform_wrapper: false
       - name: Initialize OIDC backend
         run: bash ../../scripts/ci/terraform-init.sh
-      - name: Write environment configuration
-        env:
-          TFVARS_JSON: ${{ secrets.TFVARS_JSON }}
-        run: |
-          test -n "$TFVARS_JSON"
-          umask 077
-          printf '%s' "$TFVARS_JSON" > terraform.tfvars.json
-          jq -e --arg subscription "$ARM_SUBSCRIPTION_ID" --arg tenant "$ARM_TENANT_ID" \
-            '.environment == "poc" and .subscription_id == $subscription and .tenant_id == $tenant' \
-            terraform.tfvars.json > /dev/null
+      - name: Use versioned POC configuration
+        run: test -f terraform.tfvars
       - name: Create saved plan
         id: plan
         run: |
@@ -96,7 +88,11 @@ jobs:
       - name: Check deletion policy and summarize
         env:
           ALLOW_DELETIONS: ${{ inputs.allow_deletions }}
-        run: terraform show -json tfplan | python ../../scripts/ci/check-plan.py
+        run: |
+          terraform show -json tfplan | jq -e \
+            --arg subscription "$ARM_SUBSCRIPTION_ID" --arg tenant "$ARM_TENANT_ID" \
+            '.variables.environment.value == "poc" and .variables.subscription_id.value == $subscription and .variables.tenant_id.value == $tenant' > /dev/null
+          terraform show -json tfplan | python ../../scripts/ci/check-plan.py
       - name: Encrypt saved plan
         if: steps.plan.outputs.changes == '2'
         env:
@@ -115,11 +111,12 @@ jobs:
           if-no-files-found: error
       - name: Remove plaintext files
         if: always()
-        run: rm -f terraform.tfvars.json tfplan tfplan.sha256 plan.tar.gz
+        run: rm -f tfplan tfplan.sha256 plan.tar.gz
 
   apply:
     needs: plan
-    if: needs.plan.outputs.changes == '2'
+    # Disabled while infrastructure plans are being reviewed.
+    if: ${{ false }}
     environment: terraform-poc
     runs-on: ubuntu-24.04
     timeout-minutes: 60

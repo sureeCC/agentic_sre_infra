@@ -39,8 +39,12 @@ terraform init -backend-config=..\..\backend.hcl
 Pop-Location
 ```
 
-Do not commit `backend.hcl`, `*.tfvars`, client secrets, Event Hubs SAS keys, or
-database passwords. The target runtime design uses managed identities instead.
+The reviewed, non-secret `environments/poc/terraform.tfvars` is versioned and
+automatically loaded by Terraform. Other tfvars files remain ignored by default.
+Do not commit `backend.hcl`, client secrets, Event Hubs SAS keys, database
+passwords, or secrets in variable files. The target runtime design uses managed
+identities instead. The GitHub Actions Terraform apply job is currently disabled;
+manual workflow runs validate and plan only.
 
 ## Local workflow
 

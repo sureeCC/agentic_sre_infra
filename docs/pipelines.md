@@ -6,12 +6,16 @@ Azure OIDC, SHA-pinned actions, job timeouts, and workflow concurrency. Configur
 the controls below before the first deployment run; workflow files cannot create
 GitHub environment reviewers or Azure federated credentials themselves.
 
+Terraform currently validates and plans only: its apply job is unconditionally
+disabled. Function App and hosted agent deployment workflows are unchanged.
+
 ## Active deployment target
 
 The workflows currently target the existing POC resources in resource group `test`.
 Use the existing backend key `agentic-sre/poc.tfstate` and the existing POC variable values.
 The separate `environments/prod` root is reserved for a future production rollout.
-For `TFVARS_JSON`, convert the actual local POC HCL configuration to JSON; the example is only a field reference.
+Terraform automatically loads the versioned `environments/poc/terraform.tfvars`.
+It contains non-secret POC values; the example is only a field reference.
 
 ## GitHub environments and Azure identities
 
@@ -89,12 +93,12 @@ soft delete, and restrict state access to the deployment identities/operators.
 If state is private, replace `ubuntu-24.04` with a trusted runner that has the
 required network path. A future production environment must not share POC state.
 
-Set `TFVARS_JSON` as a **secret** in `terraform-plan-poc`: a complete Terraform
-JSON variable object. Use `environments/poc/terraform.tfvars.example` as the field
-reference, supply the actual existing POC values, and set `environment` to `poc`.
-HCL is not JSON. Retain the existing names, subscription/tenant IDs, Windows
-Function OS, consumer group, model, project endpoint, database administrator,
-and reviewed firewall rules. The example is not an import-ready configuration.
+Review changes to `environments/poc/terraform.tfvars` in source control. Retain
+the existing names, subscription/tenant IDs, Windows Function OS, consumer group,
+model, project endpoint, database administrator, and reviewed firewall rules.
+Keep credentials and secrets out of this file. `TFVARS_JSON` is no longer used
+by the workflow. The example is not an import-ready configuration. The plan job
+checks that the POC tenant/subscription match its configured Azure identity.
 
 Set the same strong random `TF_PLAN_KEY` **secret** in both Terraform
 environments. For example, generate one offline with `openssl rand -base64 48`.
@@ -104,9 +108,11 @@ retained, for one day; do not rotate this key between plan and apply jobs.
 Run the workflow on `main`. It validates, initializes the OIDC backend, locks
 state, creates a saved plan, summarizes action counts, and rejects resource
 deletes/replacements unless `allow_deletions` was explicitly selected. Review
-the complete plan in the plan job log before approving `terraform-poc`. Apply
-downloads the artifact from that same run, verifies its decrypted SHA256, and
-applies that exact saved plan without replanning. A no-change plan skips apply.
+the complete plan in the plan job log. The apply job always skips, including
+when changes are detected. Re-enabling it requires a reviewed workflow change
+to restore its condition to `needs.plan.outputs.changes == '2'`. When enabled,
+apply downloads the artifact from that same run, verifies its decrypted SHA256,
+and applies that exact saved plan without replanning after environment approval.
 Drift that makes the plan stale must result in a fresh run and fresh review.
 
 For existing resources, import them through a reviewed operator process before

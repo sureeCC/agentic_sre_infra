@@ -29,6 +29,8 @@ __pycache__/
 # Variable and backend files can contain tenant, subscription, or secret values
 *.tfvars
 *.tfvars.json
+# Reviewed, non-secret POC configuration is versioned.
+!environments/poc/terraform.tfvars
 backend.hcl
 
 # Keep the dependency lock file in source control
