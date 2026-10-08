@@ -55,7 +55,7 @@ try {
       $name = $block.Split('"')[0]
       if ($block -notmatch '\bdefault\s*=' -and $name -notin $inputs) { throw "Missing input: $environmentName/$name" }
     }
-    if ($rendered.remote_state.config.key -ne "agentic-sre/$environmentName.tfstate") { throw "Unexpected combined state key: $environmentName" }
+    if ($rendered.remote_state.config.key -ne "agentic-sre/$environmentName.tfstate") { throw "Unexpected combined state key for ${environmentName}: '$($rendered.remote_state.config.key)'" }
     if ($ValidateTerraform) {
       & $TerragruntPath run --no-auto-init --non-interactive --working-dir $destination -- init -backend=false -input=false -lockfile=readonly
       if ($LASTEXITCODE -ne 0) { throw "Initialization failed: $environmentName" }

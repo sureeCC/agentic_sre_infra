@@ -1,7 +1,8 @@
 # Shared provider and combined backend generation for each environment stack.
 locals {
-  common = read_terragrunt_config("${get_original_terragrunt_dir()}/common.hcl")
-  config = local.common.locals.config
+  common             = read_terragrunt_config("${get_original_terragrunt_dir()}/common.hcl")
+  config             = local.common.locals.config
+  state_key_override = get_env("TG_STATE_KEY", "")
 }
 
 generate "providers" {
@@ -45,7 +46,7 @@ remote_state {
     storage_account_name = get_env("TG_STATE_STORAGE_ACCOUNT", "sttfstateagenticsre244b")
     container_name       = get_env("TG_STATE_CONTAINER", "tfstate")
     # Preserve the combined Terraform backend and all module resource addresses.
-    key              = get_env("TG_STATE_KEY", "agentic-sre/${local.config.environment}.tfstate")
+    key              = local.state_key_override == "" ? "agentic-sre/${local.config.environment}.tfstate" : local.state_key_override
     subscription_id  = get_env("TG_STATE_SUBSCRIPTION_ID", local.config.subscription_id)
     tenant_id        = get_env("TG_STATE_TENANT_ID", local.config.tenant_id)
     use_azuread_auth = true
