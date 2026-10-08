@@ -11,11 +11,11 @@ Terragrunt currently validates and optionally plans only; it has no apply job. F
 ## Active deployment target
 
 The workflows target the existing POC resources in resource group `test`.
-Infrastructure now uses `terragrunt/environments/poc`, with inputs in each unit's
-`terragrunt.hcl` and shared values in `common.hcl`. CI does not load `.tfvars`.
-The old combined state key `agentic-sre/poc.tfstate` must be migrated into six
-unit states before live planning. See [Terragrunt migration instructions](../terragrunt/README.md).
-Production receives offline validation only; its real rollout needs reviewed values.
+Infrastructure uses the single stack in `terragrunt/environments/poc`, reading
+inputs from `terragrunt.hcl` and shared values from `common.hcl`, without `.tfvars`.
+All six resource modules share the existing `agentic-sre/poc.tfstate` backend.
+The stack preserves original module resource addresses, so no state split is
+needed. Production has a separate combined state and receives offline validation.
 
 ## GitHub environments and Azure identities
 
@@ -64,52 +64,43 @@ apply identity sufficient directory rights independently of ownership.
 ## 1. Terragrunt POC
 
 Workflow: `.github/workflows/terraform.yml`, displayed as **Terragrunt POC**.
-Terraform 1.9.8 executes beneath checksum-verified Terragrunt 1.1.6.
+Terraform 1.9.8 runs beneath checksum-verified Terragrunt 1.1.6.
 
-Pushes to `main`, relevant pull requests, and manual runs check HCL formatting
-and all 12 POC/production units. Validation copies the configuration to a
-temporary directory, uses synthetic dependency outputs, initializes providers
-with `-backend=false -lockfile=readonly`, and runs `terragrunt validate`.
-It needs no Azure login, remote state, or production variables. The normal unit
-configuration permits placeholders only for validation, never live planning.
-Each unit's committed lock file includes Windows and Linux provider checksums.
-Update locks deliberately with `terragrunt providers lock
--platform=linux_amd64 -platform=windows_amd64` from each unit.
+Pushes to `main`, relevant PRs, and manual runs check formatting and both combined
+POC/production stacks. Offline validation uses temporary configurations and
+`terragrunt init -backend=false -lockfile=readonly`, followed by
+`terragrunt validate`. Azure access and real production variables are unnecessary.
+Each stack has a committed provider lock file with Linux and Windows checksums.
 
-Set these variables in the existing **terraform-plan-poc** GitHub environment:
+Set the following variables in the existing **terraform-plan-poc** environment:
 
 | Variable | Purpose |
 |---|---|
 | `AZURE_CLIENT_ID` | OIDC planning identity |
 | `AZURE_TENANT_ID` | POC tenant |
-| `AZURE_SUBSCRIPTION_ID` | POC subscription and state subscription |
+| `AZURE_SUBSCRIPTION_ID` | POC and state subscription |
 | `TF_STATE_RESOURCE_GROUP` | Existing state resource group |
 | `TF_STATE_STORAGE_ACCOUNT` | Existing state storage account |
 | `TF_STATE_CONTAINER` | Existing state container |
+| `TF_STATE_KEY` | Existing combined key: `agentic-sre/poc.tfstate` |
 
-The workflow maps existing `TF_STATE_*` variables to Terragrunt's `TG_STATE_*`
-variables. `TF_STATE_KEY` and `TFVARS_JSON` are no longer used. State keys are
-`agentic-sre/terragrunt/environments/poc/UNIT/terraform.tfstate`.
-Set the `TF_PLAN_KEY` secret to encrypt saved plans before artifact upload.
+The workflow maps `TF_STATE_*` to Terragrunt `TG_STATE_*`. `TFVARS_JSON` is unused.
+Set the `TF_PLAN_KEY` secret to encrypt the saved plan artifact.
 
-To check CI before migration, push the change or manually run the workflow with
-**run_plan unchecked**. To review a live plan, migrate ownership of every managed
-resource instance, then run on `main` with **run_plan checked**. The plan job
-uses OIDC, rejects unit states without managed resources, runs the six units in
-dependency order, verifies the Azure tenant/subscription in each JSON plan, and
-summarizes actions using the existing deletion policy. Nonempty state is an early
-migration check, not proof that every resource was migrated; operators must
-reconcile all resource instances against the original state.
+Pushes and PRs validate only. To run a live plan, manually run on `main` with
+**run_plan checked**. The job verifies the combined state contains managed
+resources, creates one saved plan covering all six modules, checks its Azure
+subscription/tenant, and applies the existing deletion-policy check. Select
+`allow_deletions` only for reviewed replacements or deletes.
 
-Saved binary and JSON plans are encrypted and retained for one day. Plaintext
-plans are removed afterward. There is no apply job, automatic import, or state
-migration in this workflow. Do not run the old combined Terraform pipeline
-against resources owned by the Terragrunt unit states. Re-enabling deployment
-requires a reviewed change that applies the exact saved per-unit plans after
-GitHub environment approval.
+The binary and JSON plan are encrypted and retained for one day. Plaintext plans
+are removed afterward. No apply job is enabled. The Terragrunt stack preserves
+the old Terraform module addresses and backend key; do not run both infrastructure
+pipelines as concurrent owners. If the original state lacks a resource, reconcile
+its ownership through a reviewed import before applying.
 
-Private networking, Easy Auth, Foundry projects, and database role/bootstrap
-steps remain prerequisites described in the Terragrunt and application runbooks.
+Private networking, Easy Auth, Foundry projects, and database bootstrap remain
+separate infrastructure/application prerequisites.
 
 ## 2. Function App
 

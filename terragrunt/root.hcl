@@ -1,6 +1,6 @@
-# Shared provider and backend generation for every resource unit.
+# Shared provider and combined backend generation for each environment stack.
 locals {
-  common = read_terragrunt_config(find_in_parent_folders("common.hcl"))
+  common = read_terragrunt_config("${get_original_terragrunt_dir()}/common.hcl")
   config = local.common.locals.config
 }
 
@@ -44,11 +44,12 @@ remote_state {
     resource_group_name  = get_env("TG_STATE_RESOURCE_GROUP", "test")
     storage_account_name = get_env("TG_STATE_STORAGE_ACCOUNT", "sttfstateagenticsre244b")
     container_name       = get_env("TG_STATE_CONTAINER", "tfstate")
-    key                  = "agentic-sre/terragrunt/${replace(path_relative_to_include("root"), "\\", "/")}/terraform.tfstate"
-    subscription_id      = get_env("TG_STATE_SUBSCRIPTION_ID", local.config.subscription_id)
-    tenant_id            = get_env("TG_STATE_TENANT_ID", local.config.tenant_id)
-    use_azuread_auth     = true
-    use_oidc             = tobool(get_env("TG_USE_OIDC", "false"))
-    use_cli              = !tobool(get_env("TG_USE_OIDC", "false"))
+    # Preserve the combined Terraform backend and all module resource addresses.
+    key              = get_env("TG_STATE_KEY", "agentic-sre/${local.config.environment}.tfstate")
+    subscription_id  = get_env("TG_STATE_SUBSCRIPTION_ID", local.config.subscription_id)
+    tenant_id        = get_env("TG_STATE_TENANT_ID", local.config.tenant_id)
+    use_azuread_auth = true
+    use_oidc         = tobool(get_env("TG_USE_OIDC", "false"))
+    use_cli          = !tobool(get_env("TG_USE_OIDC", "false"))
   }
 }

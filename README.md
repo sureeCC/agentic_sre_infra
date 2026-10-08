@@ -3,8 +3,8 @@
 ## Terragrunt configuration
 
 A separate [Terragrunt layout](terragrunt/README.md) provides shared root/common
-configuration and one unit per existing module for POC and production. Read its
-state ownership migration instructions before using it for existing resources.
+configuration and one combined stack per environment. All six POC modules reuse
+the existing state key and resource addresses; inputs are in Terragrunt HCL.
 
 ## CI/CD pipelines
 

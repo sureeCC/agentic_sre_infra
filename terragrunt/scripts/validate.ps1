@@ -7,10 +7,11 @@ $ErrorActionPreference = 'Stop'
 $layout = Split-Path $PSScriptRoot -Parent
 $repo = Split-Path $layout -Parent
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('agentic-sre-tg-' + [guid]::NewGuid())
-$environmentValues = @{
+$values = @{
+  TG_TF_PATH = $TerraformPath
   TG_STATE_RESOURCE_GROUP = 'validation-only'
   TG_STATE_STORAGE_ACCOUNT = 'validationonly'
-  TG_TF_PATH = $TerraformPath
+  TG_STATE_KEY = ''
   TG_PROD_SUBSCRIPTION_ID = '00000000-0000-0000-0000-000000000001'
   TG_PROD_TENANT_ID = '00000000-0000-0000-0000-000000000002'
   TG_PROD_COST_CENTER = 'validation'
@@ -23,71 +24,52 @@ $environmentValues = @{
 $previous = @{}
 try {
   & $TerragruntPath hcl fmt --check --working-dir (Join-Path $layout 'environments')
-  if ($LASTEXITCODE -ne 0) { throw 'Environment formatting check failed' }
+  if ($LASTEXITCODE -ne 0) { throw 'Formatting failed' }
   New-Item -ItemType Directory -Path $fixture | Out-Null
-  Copy-Item -LiteralPath (Join-Path $layout 'root.hcl') -Destination $fixture
-  foreach ($envName in @('poc', 'prod')) {
-    $destination = Join-Path $fixture "environments/$envName"
-    New-Item -ItemType Directory -Path $destination -Force | Out-Null
-    Copy-Item -LiteralPath "$layout/environments/$envName/common.hcl" -Destination $destination
-    foreach ($moduleName in @('resource-group', 'app-registrations', 'event-hubs', 'foundry', 'function-app', 'postgresql')) {
-      New-Item -ItemType Directory -Path "$destination/$moduleName" -Force | Out-Null
-      Copy-Item -LiteralPath "$layout/environments/$envName/$moduleName/terragrunt.hcl" -Destination "$destination/$moduleName"
-      Copy-Item -LiteralPath "$layout/environments/$envName/$moduleName/.terraform.lock.hcl" -Destination "$destination/$moduleName"
-    }
-  }
-  foreach ($key in $environmentValues.Keys) {
+  Copy-Item -LiteralPath "$layout/root.hcl" -Destination $fixture
+  foreach ($key in $values.Keys) {
     $previous[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-    [Environment]::SetEnvironmentVariable($key, $environmentValues[$key], 'Process')
+    [Environment]::SetEnvironmentVariable($key, $values[$key], 'Process')
   }
-  # The temporary fixture also allows validation placeholders during render.
-  foreach ($common in Get-ChildItem "$fixture/environments" -Recurse -Filter common.hcl) {
-    $text = Get-Content -LiteralPath $common.FullName -Raw
-    $moduleRoot = (Join-Path $repo 'modules').Replace('\', '/')
-    $text = [regex]::Replace($text, '(?m)^  iac_modules_repo = .*$', ('  iac_modules_repo = "' + $moduleRoot + '"'))
-    Set-Content -LiteralPath $common.FullName -Value $text -Encoding UTF8
-  }
-  $count = 0
-  foreach ($unit in Get-ChildItem "$fixture/environments" -Recurse -Filter terragrunt.hcl) {
-    $text = Get-Content -LiteralPath $unit.FullName -Raw
-    $text = [regex]::Replace($text, 'skip_outputs\s*=\s*get_terraform_command\(\) == "validate"', 'skip_outputs = true')
-    $text = $text.Replace('["validate"]', '["render", "init", "validate"]')
-    Set-Content -LiteralPath $unit.FullName -Value $text -Encoding UTF8
-    $json = & $TerragruntPath render --json --config $unit.FullName
-    if ($LASTEXITCODE -ne 0) { throw "Render failed: $($unit.FullName)" }
+  $variables = Get-Content "$repo/modules/agentic-sre-stack/variables.tf" -Raw
+  $declared = [regex]::Matches($variables, 'variable "([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
+  foreach ($environmentName in @('poc','prod')) {
+    $destination = Join-Path $fixture "environments/$environmentName"
+    New-Item -ItemType Directory -Path $destination -Force | Out-Null
+    foreach ($fileName in @('common.hcl','terragrunt.hcl','.terraform.lock.hcl')) {
+      Copy-Item -LiteralPath "$layout/environments/$environmentName/$fileName" -Destination $destination
+    }
+    $unit = Join-Path $destination 'terragrunt.hcl'
+    $text = Get-Content -LiteralPath $unit -Raw
+    $source = ($repo.Replace('\','/') + '/modules//agentic-sre-stack')
+    $text = [regex]::Replace($text, '(?m)^  source = .*$', ('  source = "' + $source + '"'))
+    Set-Content -LiteralPath $unit -Value $text -Encoding UTF8
+    $json = & $TerragruntPath render --json --config $unit
+    if ($LASTEXITCODE -ne 0) { throw "Render failed: $environmentName" }
     $rendered = $json | ConvertFrom-Json
-    $module = $unit.Directory.Name
-    $variables = Get-Content "$repo/modules/$module/variables.tf" -Raw
-    $declared = [regex]::Matches($variables, 'variable "([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
     $inputs = @($rendered.inputs.PSObject.Properties.Name)
-    foreach ($inputName in $inputs) {
-      if ($inputName -notin $declared) { throw "Unknown input: $module/$inputName" }
+    foreach ($name in $inputs) {
+      if ($name -notin $declared) { throw "Unknown input: $environmentName/$name" }
     }
     foreach ($block in [regex]::Split($variables, '(?m)^variable "') | Select-Object -Skip 1) {
       $name = $block.Split('"')[0]
-      if ($block -notmatch '\bdefault\s*=' -and $name -notin $inputs) { throw "Missing input: $module/$name" }
+      if ($block -notmatch '\bdefault\s*=' -and $name -notin $inputs) { throw "Missing input: $environmentName/$name" }
     }
-    $expectedKey = "agentic-sre/terragrunt/environments/$($unit.Directory.Parent.Name)/$module/terraform.tfstate"
-    if ($rendered.remote_state.config.key -ne $expectedKey) { throw "Unexpected state key: $module" }
-    if (-not (Test-Path ($rendered.terraform.source.Replace('//', '/')))) { throw "Module source does not exist: $module" }
+    if ($rendered.remote_state.config.key -ne "agentic-sre/$environmentName.tfstate") { throw "Unexpected combined state key: $environmentName" }
     if ($ValidateTerraform) {
-      & $TerragruntPath run --no-auto-init --non-interactive --working-dir $unit.Directory.FullName -- init -backend=false -input=false -lockfile=readonly
-      if ($LASTEXITCODE -ne 0) { throw "Provider initialization failed: $($unit.FullName)" }
-      & $TerragruntPath run --no-auto-init --non-interactive --working-dir $unit.Directory.FullName -- validate
-      if ($LASTEXITCODE -ne 0) { throw "Terraform validation failed: $($unit.FullName)" }
+      & $TerragruntPath run --no-auto-init --non-interactive --working-dir $destination -- init -backend=false -input=false -lockfile=readonly
+      if ($LASTEXITCODE -ne 0) { throw "Initialization failed: $environmentName" }
+      & $TerragruntPath run --no-auto-init --non-interactive --working-dir $destination -- validate
+      if ($LASTEXITCODE -ne 0) { throw "Provider validation failed: $environmentName" }
     }
-    $count++
-    Write-Output "PASS $($unit.Directory.Parent.Name)/$module"
+    Write-Output "PASS $environmentName combined stack (six resource modules)"
   }
-  if ($count -ne 12) { throw "Expected 12 units, found $count" }
-  Write-Output 'Validated 12 unit renders, module input names, required inputs, module paths, and state keys. No Azure access or Terraform plan performed.'
-  if ($ValidateTerraform) { Write-Output 'Terraform provider validation also passed for all 12 units with backend initialization disabled.' }
+  Write-Output 'Both combined stacks passed configuration checks. No Azure access or Terraform plan performed.'
 } finally {
   foreach ($key in $previous.Keys) { [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process') }
-  # Delete only this invocation's unique temporary directory.
   if ((Test-Path $fixture) -and (Split-Path $fixture -Leaf) -like 'agentic-sre-tg-*' -and (Split-Path $fixture -Parent) -eq ([IO.Path]::GetTempPath()).TrimEnd([char[]]'\/')) {
     if ($ValidateTerraform -and $env:OS -eq 'Windows_NT') {
-      Write-Output "Windows provider validation fixture retained at $fixture (provider paths exceed legacy PowerShell limits)."
+      Write-Output "Windows provider fixture retained at $fixture."
     } else {
       Remove-Item -LiteralPath $fixture -Recurse -Force
     }

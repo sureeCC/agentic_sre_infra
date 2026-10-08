@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       run_plan:
-        description: Plan existing POC resources after state ownership migration
+        description: Plan all POC resources using the existing combined state
         type: boolean
         default: false
       allow_deletions:
@@ -45,7 +45,7 @@ jobs:
         run: bash scripts/ci/install-terragrunt.sh
       - name: Check Terragrunt formatting
         run: terragrunt hcl fmt --check --working-dir terragrunt
-      - name: Validate all POC and production units without Azure
+      - name: Validate POC and production combined stacks without Azure
         shell: pwsh
         run: |
           $env:TF_PLUGIN_CACHE_DIR = Join-Path $env:RUNNER_TEMP 'terraform-provider-cache'
@@ -71,6 +71,7 @@ jobs:
       TG_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
       TG_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
       TG_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+      TG_STATE_KEY: ${{ vars.TF_STATE_KEY }}
       TG_STATE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       TG_STATE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       ALLOW_DELETIONS: ${{ inputs.allow_deletions }}
@@ -84,7 +85,7 @@ jobs:
           terraform_wrapper: false
       - name: Install checksum-verified Terragrunt 1.1.6
         run: bash scripts/ci/install-terragrunt.sh
-      - name: Verify migrated state and plan all six POC units
+      - name: Verify combined state and plan all POC resources
         run: bash scripts/ci/terragrunt-plan.sh
       - name: Encrypt saved plans
         env:
@@ -103,4 +104,4 @@ jobs:
         if: always()
         run: rm -rf plan-artifacts plan.tar.gz
 
-  # Apply remains disabled during state migration. No deployment job is present.
+  # Apply remains disabled during infrastructure review. No deployment job is present.
