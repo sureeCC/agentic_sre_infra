@@ -34,6 +34,10 @@ If a cancelled run leaves a Foundry state lock behind, verify that the owning ru
 
 For a recovered Foundry account not tracked in state, select Action=import and Unit=foundry. The workflow verifies the exact configured account exists, imports `azurerm_cognitive_account.foundry` if absent from state, and generates a fresh plan without applying it. Account recovery must happen first; this action does not purge or recover Azure resources. Other units are rejected for import.
 
+Dev Foundry uses `FOUNDRY_INSTANCE=002` after the recovered instance 001 repeatedly failed project creation with Azure InternalServerError. Other services still use `INSTANCE=001`. An empty FOUNDRY_INSTANCE defaults to INSTANCE. Foundry retains the shared user-assigned identity and enables its own system-assigned identity as well.
+
+For an account replacement, the import action accepts `foundry_replacement_from_id`. It checks the exact old account ID against state and requires the replacement account and project to be healthy. It snapshots the remote state blob, removes only the old account/project state addresses, and imports their replacements. The old Azure account is retained for separately verified cleanup; this operation never purges it. Leave this input empty on ordinary runs. The endpoint and DNS resources remain tracked for the subsequent plan/apply.
+
 Set LOCAL_MODULES_ROOT to a clone of agentic_sre_modules, with forward slashes. Export the same configuration variables plus BRANCH_NAME and GITHUB_REPOSITORY. Run Terragrunt inside live/<unit>. Keep real remote state for meaningful plans.
 
 ## Automatic naming

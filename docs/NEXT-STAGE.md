@@ -6,8 +6,8 @@ Target: personal subscription `244b1140-2e3c-4232-8c86-2b77c04ca37e`, Dev resour
 
 | Setting | Dev value |
 |---|---|
-| Foundry account | `ai-agenticsre-dev-wus-001-244b11` |
-| Foundry project | `proj-agenticsre-dev-wus-001` |
+| Foundry account | `ai-agenticsre-dev-wus-002-244b11` |
+| Foundry project | `proj-agenticsre-dev-wus-002` |
 | Model deployment | `alert-agent-mini` |
 | Container registry | `acragenticsredevwus001244b11.azurecr.io` |
 | Event Hub namespace | `ehns-agenticsre-dev-wus-001-244b11.servicebus.windows.net` |
@@ -17,7 +17,7 @@ Target: personal subscription `244b1140-2e3c-4232-8c86-2b77c04ca37e`, Dev resour
 | Database | `agenticsre` |
 | Runtime user-assigned identity | `mi-agenticsre-dev-wus-001` |
 
-The project endpoint is `https://ai-agenticsre-dev-wus-001-244b11.services.ai.azure.com/api/projects/proj-agenticsre-dev-wus-001`.
+The project endpoint is `https://ai-agenticsre-dev-wus-002-244b11.services.ai.azure.com/api/projects/proj-agenticsre-dev-wus-002`.
 
 ## Work remaining before application deployment
 
