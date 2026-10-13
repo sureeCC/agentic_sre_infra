@@ -29,3 +29,5 @@ The project endpoint is `https://ai-agenticsre-dev-wus-002-244b11.services.ai.az
 6. Use a runner/network path that can reach private deployment and application endpoints. Verify private DNS resolution and actual service requests from that network before testing the alert flow.
 
 Keep Azure authentication on managed identity/OIDC. The infrastructure PostgreSQL bootstrap password remains a GitHub Environment secret; it is not an Azure authentication client secret. Backend storage remains accessible to the pipeline using Entra authentication and container-scoped blob permissions.
+
+Foundry bootstrap access was configured on the replacement account: Foundry User for the project's system-assigned identity, `mi-agenticsre-dev-wus-001`, and the personal Azure user. These account-scoped assignments were created with the personal administrator, outside Terraform. If either runtime identity is replaced, reconcile its permissions. Event Hub, ACR, Key Vault and database runtime grants remain part of the application stage; the pipeline identity has not been given role-assignment administration.
