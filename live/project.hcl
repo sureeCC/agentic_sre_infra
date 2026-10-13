@@ -1,6 +1,6 @@
 locals {
   iac_modules_repo      = get_env("IAC_MODULES_REPO", "git::https://github.com/sureeCC/agentic_sre_modules.git")
-  module_ref            = get_env("MODULE_REF", "8ac2a48d07090dc4b823a282d456ec361e9ac865")
+  module_ref            = get_env("MODULE_REF", "89ca9b8386158ced7f517e9a8f407f70476666d1")
   subscription_id       = get_env("ARM_SUBSCRIPTION_ID")
   tenant_id             = get_env("ARM_TENANT_ID")
   app                   = get_env("APP")
