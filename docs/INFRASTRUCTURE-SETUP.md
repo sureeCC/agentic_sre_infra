@@ -14,8 +14,7 @@ AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
 LOCATION, REGION, INSTANCE, RESOURCE_GROUP_NAME,
 VNET_NAME, VNET_RESOURCE_GROUP_NAME, PVE_SUBNET_NAME, SVC_SUBNET_NAME,
 POSTGRES_DNS_ZONE_NAME, POSTGRES_DNS_RESOURCE_GROUP,
-MODEL_NAME, MODEL_VERSION, MODEL_CAPACITY,
-ACR_NAME, FOUNDRY_NAME, FOUNDRY_PROJECT_NAME, EVENTHUB_NAMESPACE_NAME,
+MODEL_NAME, MODEL_VERSION, MODEL_CAPACITY (Foundry only; capacity defaults to 1),
 APP, OWNER, PROVISIONED_TIME,
 STATE_RESOURCE_GROUP, STATE_STORAGE_ACCOUNT, STATE_CONTAINER.
 
@@ -32,3 +31,20 @@ Module initialization/validation passed locally before publication. Outstanding 
 ## Local use
 
 Set LOCAL_MODULES_ROOT to a clone of agentic_sre_modules, with forward slashes. Export the same configuration variables plus BRANCH_NAME and GITHUB_REPOSITORY. Run Terragrunt inside live/<unit>. Keep real remote state for meaningful plans.
+
+## Automatic naming
+
+Shared/naming still owns managed identity, Key Vault and PostgreSQL names. Terragrunt derives required explicit ACR/Foundry/Event Hub names in live/common.hcl using the same prefix-environment-region-instance ordering. Globally unique explicit account names include the first six subscription hex characters. ACR removes separators. Key Vault uses a compact prefix and four-character subscription suffix to stay within 24 characters. Uniqueness is not guaranteed by a suffix; Azure checks availability at creation.
+
+Default Dev names with APP=agenticsre, REGION=wus, INSTANCE=001:
+- Managed identity: mi-agenticsre-dev-wus-001
+- Key Vault: kv-sre-244b-dev-wus-001
+- PostgreSQL: pg-sre-244b11-dev-wus-001
+- ACR: acragenticsredevwus001244b11
+- Foundry: ai-agenticsre-dev-wus-001-244b11
+- Foundry project: proj-agenticsre-dev-wus-001
+- Event Hub namespace: ehns-agenticsre-dev-wus-001-244b11
+
+QA substitutes qa for dev. ACR_NAME, FOUNDRY_NAME, FOUNDRY_PROJECT_NAME and EVENTHUB_NAMESPACE_NAME are no longer required GitHub variables. Backend/network names reference resources already provisioned and remain configured. Database DNS settings/password are checked only for database; model settings only for foundry. All units share configuration parsing, with unrelated model/DNS values allowed to be empty.
+
+These naming changes apply to new resources. Review plans carefully before changing names of resources already managed in state: renames can force replacement. Precreated pipeline identities, VNets and state storage retain their existing names.

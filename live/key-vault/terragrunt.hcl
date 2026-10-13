@@ -9,7 +9,7 @@ terraform {
   source = get_env("LOCAL_MODULES_ROOT", "") != "" ? "${get_env("LOCAL_MODULES_ROOT")}//Security/Keyvault" : "${include.common.locals.iac_modules_repo}//Security/Keyvault?ref=${include.common.locals.module_ref}"
 }
 inputs = {
-  resource_prefix               = "kv-sre"
+  resource_prefix               = include.common.locals.names.keyvault_prefix
   sku_name                      = "standard"
   enable_rbac_authorization     = true
   purge_protection_enabled      = true

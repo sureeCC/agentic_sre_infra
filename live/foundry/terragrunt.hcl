@@ -13,7 +13,7 @@ dependency "identity" {
 }
 inputs = {
   resource_prefix               = "ai-sre"
-  foundry_name                  = include.common.locals.environment.foundry_name
+  foundry_name                  = include.common.locals.names.foundry
   sku_name                      = "S0"
   project_management_enabled    = true
   local_authentication_enabled  = false
@@ -25,7 +25,7 @@ inputs = {
   subnet_name                   = include.common.locals.environment.pve_subnet_name
   projects = {
     imo = {
-      name          = include.common.locals.environment.foundry_project_name
+      name          = include.common.locals.names.foundry_project
       display_name  = "Agentic SRE IMO"
       identity_type = "SystemAssigned"
     }

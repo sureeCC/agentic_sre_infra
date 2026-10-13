@@ -10,7 +10,7 @@ terraform {
 }
 inputs = {
   resource_prefix               = "eh-alerts"
-  eventhub_namespace_name       = include.common.locals.environment.eventhub_namespace_name
+  eventhub_namespace_name       = include.common.locals.names.eventhub_namespace
   namespace_sku                 = "Standard"
   capacity                      = 1
   auto_inflate_enabled          = false

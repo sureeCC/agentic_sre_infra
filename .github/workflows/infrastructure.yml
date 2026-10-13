@@ -52,10 +52,6 @@ jobs:
       MODEL_NAME: ${{ vars.MODEL_NAME }}
       MODEL_VERSION: ${{ vars.MODEL_VERSION }}
       MODEL_CAPACITY: ${{ vars.MODEL_CAPACITY }}
-      ACR_NAME: ${{ vars.ACR_NAME }}
-      FOUNDRY_NAME: ${{ vars.FOUNDRY_NAME }}
-      FOUNDRY_PROJECT_NAME: ${{ vars.FOUNDRY_PROJECT_NAME }}
-      EVENTHUB_NAMESPACE_NAME: ${{ vars.EVENTHUB_NAMESPACE_NAME }}
       IAC_MODULES_REPO: ${{ vars.IAC_MODULES_REPO }}
       MODULE_REF: ${{ vars.MODULE_REF }}
       APP: ${{ vars.APP }}

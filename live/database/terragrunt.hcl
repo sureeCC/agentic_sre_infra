@@ -9,7 +9,7 @@ terraform {
   source = get_env("LOCAL_MODULES_ROOT", "") != "" ? "${get_env("LOCAL_MODULES_ROOT")}//Databases/PostgreSQL-Flexible-Server" : "${include.common.locals.iac_modules_repo}//Databases/PostgreSQL-Flexible-Server?ref=${include.common.locals.module_ref}"
 }
 inputs = {
-  resource_prefix = "pg-sre"
+  resource_prefix = include.common.locals.names.postgres_prefix
   postgresql_flexible_servers = {
     primary = {
       sku_name                        = "B_Standard_B1ms"
