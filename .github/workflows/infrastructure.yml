@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: Plan or apply one unit or all resource units
+        description: Plan, apply or destroy one unit or all resource units
         type: choice
-        options: [plan, apply]
+        options: [plan, apply, destroy]
         default: plan
       environment:
         description: GitHub Environment supplying deployment configuration
@@ -102,6 +102,17 @@ jobs:
           test "$ARM_TENANT_ID" = "89c39546-9370-4770-a920-ea7f83a9c45e"
           test "$(az account show --query id -o tsv)" = "$ARM_SUBSCRIPTION_ID"
           test "$(az account show --query tenantId -o tsv)" = "$ARM_TENANT_ID"
-      - name: Validate, plan and optionally apply selected units
+      - name: "Stage 1: Validate"
         shell: bash
-        run: bash scripts/ci/run-infrastructure.sh
+        run: bash scripts/ci/run-infrastructure.sh validate
+      - name: "Stage 2: Plan"
+        shell: bash
+        run: bash scripts/ci/run-infrastructure.sh plan
+      - name: "Stage 3: Apply saved plans"
+        if: inputs.action == 'apply'
+        shell: bash
+        run: bash scripts/ci/run-infrastructure.sh apply
+      - name: "Stage 3: Destroy using saved plans"
+        if: inputs.action == 'destroy'
+        shell: bash
+        run: bash scripts/ci/run-infrastructure.sh apply

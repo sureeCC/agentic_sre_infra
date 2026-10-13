@@ -51,8 +51,12 @@ These naming changes apply to new resources. Review plans carefully before chang
 
 ## All resource units
 
-Choose Unit=all to run managed-identity, event-hub, acr, key-vault, database and foundry sequentially. Each keeps its existing per-unit/environment state blob. Plan runs do not apply anything. Apply runs create a fresh saved plan for each unit and apply it before proceeding, so identity outputs exist when Foundry is planned. Failures stop later units; earlier successful applies remain deployed (there is no automatic rollback).
+Choose Unit=all to run managed-identity, event-hub, acr, key-vault, database and foundry. Each keeps its existing per-unit/environment state blob. Separate pipeline steps validate all selected units, plan all selected units, and then apply the exact saved plans when Action=apply. A failed validation or plan prevents every apply. Execution failures stop later units; earlier successful applies remain deployed.
 
 All requires the database DNS/password and Foundry model configuration in addition to shared settings. Environment-level concurrency prevents all and single-unit runs overlapping. Per-unit results appear in the run summary and grouped logs.
 
-For first-time plans, Foundry may use a deterministic preview identity ID when no managed-identity outputs exist. Mock outputs are allowed only for init/validate/plan, never apply. All-apply replans Foundry using the actual dependency state after managed-identity has been applied.
+For first-time plans, Foundry may use a deterministic preview identity ID when no managed-identity outputs exist. Mock outputs are allowed only for init/validate/plan, never apply. Managed identity is applied first; its real state outputs are available when Foundry's saved plan is applied.
+
+Action=destroy validates and creates saved destruction plans, then executes them in reverse dependency order: foundry, database, key-vault, acr, event-hub, managed-identity. It deletes only resources managed by the selected units' state, not the separately provisioned VNets, state storage or pipeline identities. Destroy does not bypass Azure deletion protection or locks.
+
+The run summary retains unit success/failure results and adds a table of Terraform resource addresses. Plans distinguish new resources, unchanged existing resources, updates, replacements and deletions. Successful executions report created, already existing, updated, replaced or deleted resources. Failed executions mark outcomes unconfirmed because a partial apply can succeed before an error. "Not in state" does not prove a same-named unmanaged Azure resource is absent; such resources require import. Saved plans remain on the runner; summaries contain only resource addresses and actions, never plan values or passwords.
