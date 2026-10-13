@@ -24,9 +24,11 @@ Secrets: MODULES_READ_TOKEN (fine-grained token with Contents: read for the priv
 
 Configure Azure OIDC federation for this GitHub repository and each Environment. Check the repository's actual OIDC subject format when creating federation; GitHub subject defaults can vary. Give the deployment identity Contributor on the workload RG and Storage Blob Data Contributor on the state container/account. Additional role-assignment permissions are needed if you later add RBAC resources.
 
-The current Azure modules require existing networking and private DNS/RBAC. The GitHub-hosted runner must reach any private data endpoints used by a resource; a connected self-hosted runner may be needed. Deploy managed-identity before foundry. ACR is Premium to support its private endpoint. Dev and QA backend/network settings are configured through GitHub Environment variables.
+The current Azure modules require existing networking and application RBAC. The ACR, Event Hub, Key Vault and Foundry units generate private DNS zones, VNet links and endpoint zone groups using shared templates under live/_templates. These resources belong to each service's state. Foundry includes Cognitive Services, OpenAI and services.ai zones. PostgreSQL uses its precreated private DNS zone. The GitHub-hosted runner must reach any private data endpoints used by a resource; a connected self-hosted runner may be needed. Deploy managed-identity before foundry. ACR is Premium to support its private endpoint. Dev and QA backend/network settings are configured through GitHub Environment variables.
 
-Module initialization/validation and infrastructure deployments have run. After destruction, reconcile soft-deleted Foundry and Key Vault accounts before reusing their names. Application readiness still requires private DNS, network access and data permissions.
+Module initialization/validation and infrastructure deployments have run. After destruction, reconcile soft-deleted Foundry and Key Vault accounts before reusing their names. Application deployment additionally requires hosting, network access and data permissions.
+
+If a cancelled run leaves a Foundry state lock behind, verify that the owning run has ended and no deployment is active. Supply that exact lock ID in foundry_recovery_lock_id for a Foundry/all plan or apply. The workflow releases only the explicitly selected Foundry lock before planning. Leave this input empty for normal runs; never unlock an active deployment.
 
 ## Local use
 
