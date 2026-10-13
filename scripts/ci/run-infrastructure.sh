@@ -31,15 +31,37 @@ for unit in "${units[@]}"; do
       import)
         # Import the exact recovered account; never infer or purge other resources.
         suffix="${ARM_SUBSCRIPTION_ID//-/}"
-        name="ai-${APP,,}-${BRANCH_NAME}-${REGION}-${INSTANCE}-${suffix:0:6}"
+        name="ai-${APP,,}-${BRANCH_NAME}-${REGION}-${FOUNDRY_INSTANCE:-$INSTANCE}-${suffix:0:6}"
         name="${name,,}"
         id="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.CognitiveServices/accounts/$name"
         az resource show --ids "$id" --subscription "$ARM_SUBSCRIPTION_ID" --query id -o tsv >/dev/null || exit $?
         addresses=$(terragrunt run -- state list) || exit $?
+        project_name="proj-${APP,,}-${BRANCH_NAME}-${REGION}-${FOUNDRY_INSTANCE:-$INSTANCE}"
+        if [[ -n "${FOUNDRY_REPLACEMENT_FROM_ID:-}" ]]; then
+          # Explicit replacement only: retain the retired Azure account and
+          # snapshot remote state before changing ownership. Never purge.
+          prefix="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.CognitiveServices/accounts/"
+          [[ "$FOUNDRY_REPLACEMENT_FROM_ID" == "$prefix"* && "$FOUNDRY_REPLACEMENT_FROM_ID" != "$id" ]] || exit 1
+          test "$(az resource show --ids "$id" --subscription "$ARM_SUBSCRIPTION_ID" --query properties.provisioningState -o tsv)" = Succeeded || exit $?
+          test "$(az rest --method get --url "https://management.azure.com$id/projects/$project_name?api-version=2026-09-01" --query properties.provisioningState -o tsv)" = Succeeded || exit $?
+          backup="$plan_dir/foundry-before-import.tfstate"
+          terragrunt run -- state pull > "$backup" || exit $?
+          current_id=$(node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log(s.resources.find(r=>r.type==="azurerm_cognitive_account"&&r.name==="foundry")?.instances[0]?.attributes.id||"")' "$backup") || exit $?
+          [[ "${current_id,,}" == "${FOUNDRY_REPLACEMENT_FROM_ID,,}" ]] || { echo 'Retired account ID does not match state; refusing replacement.' >&2; exit 1; }
+          az storage blob snapshot --auth-mode login --account-name "$STATE_STORAGE_ACCOUNT" --container-name "$STATE_CONTAINER" --name "${GITHUB_REPOSITORY##*/}/foundry/$BRANCH_NAME/terraform.tfstate" --subscription "$ARM_SUBSCRIPTION_ID" -o none || exit $?
+          terragrunt run -- state rm azurerm_cognitive_account.foundry || exit $?
+          if grep -Fxq 'azurerm_cognitive_account_project.project["imo"]' <<< "$addresses"; then
+            terragrunt run -- state rm 'azurerm_cognitive_account_project.project["imo"]' || exit $?
+          fi
+          addresses=$(terragrunt run -- state list) || exit $?
+        fi
         if ! grep -Fxq 'azurerm_cognitive_account.foundry' <<< "$addresses"; then
           terragrunt run -- import -input=false azurerm_cognitive_account.foundry "$id" || exit $?
         else
           echo 'Foundry account is already managed; import skipped.'
+        fi
+        if [[ -n "${FOUNDRY_REPLACEMENT_FROM_ID:-}" ]]; then
+          terragrunt run -- import -input=false 'azurerm_cognitive_account_project.project["imo"]' "$id/projects/$project_name" || exit $?
         fi ;;
       validate)
         terragrunt run -- init -input=false || exit $?

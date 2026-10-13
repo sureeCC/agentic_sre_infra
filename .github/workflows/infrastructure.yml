@@ -20,6 +20,10 @@ on:
         description: Optional stale Foundry lock ID; use only after its owning run has ended
         type: string
         default: ""
+      foundry_replacement_from_id:
+        description: Import only; exact retired account ID to replace in state after verifying a healthy replacement
+        type: string
+        default: ""
 permissions:
   contents: read
   id-token: write
@@ -46,6 +50,8 @@ jobs:
       LOCATION: ${{ vars.LOCATION }}
       REGION: ${{ vars.REGION }}
       INSTANCE: ${{ vars.INSTANCE }}
+      FOUNDRY_INSTANCE: ${{ vars.FOUNDRY_INSTANCE }}
+      FOUNDRY_REPLACEMENT_FROM_ID: ${{ inputs.foundry_replacement_from_id }}
       RESOURCE_GROUP_NAME: ${{ vars.RESOURCE_GROUP_NAME }}
       VNET_NAME: ${{ vars.VNET_NAME }}
       VNET_RESOURCE_GROUP_NAME: ${{ vars.VNET_RESOURCE_GROUP_NAME }}
@@ -109,10 +115,6 @@ jobs:
       - name: "Stage 1: Validate"
         shell: bash
         run: bash scripts/ci/run-infrastructure.sh validate
-      - name: Import recovered Foundry account into state
-        if: inputs.action == 'import'
-        shell: bash
-        run: bash scripts/ci/run-infrastructure.sh import
       - name: Release explicitly selected abandoned Foundry lock
         if: inputs.foundry_recovery_lock_id != ''
         shell: bash
@@ -120,10 +122,14 @@ jobs:
           RECOVERY_LOCK_ID: ${{ inputs.foundry_recovery_lock_id }}
         run: |
           test "$UNIT" = foundry || test "$UNIT" = all
-          test "$ACTION" = plan || test "$ACTION" = apply
+          test "$ACTION" = plan || test "$ACTION" = apply || test "$ACTION" = import
           [[ "$RECOVERY_LOCK_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
           cd live/foundry
           terragrunt run -- force-unlock -force "$RECOVERY_LOCK_ID"
+      - name: Import recovered Foundry account into state
+        if: inputs.action == 'import'
+        shell: bash
+        run: bash scripts/ci/run-infrastructure.sh import
       - name: "Stage 2: Plan"
         shell: bash
         run: bash scripts/ci/run-infrastructure.sh plan

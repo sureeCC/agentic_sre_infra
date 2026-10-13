@@ -23,7 +23,7 @@ inputs = {
   sku_name                      = "S0"
   project_management_enabled    = true
   local_authentication_enabled  = false
-  identity_type                 = "UserAssigned"
+  identity_type                 = "SystemAssigned, UserAssigned"
   identity_ids                  = [dependency.identity.outputs.managed_identity_id]
   public_network_access_enabled = false
   vnet_name                     = include.common.locals.environment.vnet_name
@@ -33,6 +33,7 @@ inputs = {
     imo = {
       name          = include.common.locals.names.foundry_project
       display_name  = "Agentic SRE IMO"
+      description   = "Agentic SRE deployment project"
       identity_type = "SystemAssigned"
     }
   }

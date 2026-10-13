@@ -6,13 +6,14 @@ locals {
   iac_modules_repo = local.project.iac_modules_repo
   module_ref       = local.project.module_ref
   # Match Shared/naming: prefix-environment-region-instance.
-  name_suffix   = lower(join("-", [local.environment.env, local.environment.region, local.environment.instance]))
-  app_name      = lower(local.project.app)
-  unique_suffix = substr(replace(local.project.subscription_id, "-", ""), 0, 6)
+  name_suffix    = lower(join("-", [local.environment.env, local.environment.region, local.environment.instance]))
+  app_name       = lower(local.project.app)
+  unique_suffix  = substr(replace(local.project.subscription_id, "-", ""), 0, 6)
+  foundry_suffix = lower(join("-", [local.environment.env, local.environment.region, (get_env("FOUNDRY_INSTANCE", "") != "" ? get_env("FOUNDRY_INSTANCE") : local.environment.instance)]))
   names = {
     acr                = lower(replace("acr${local.app_name}-${local.name_suffix}-${local.unique_suffix}", "/[^a-zA-Z0-9]/", ""))
-    foundry            = "ai-${local.app_name}-${local.name_suffix}-${local.unique_suffix}"
-    foundry_project    = "proj-${local.app_name}-${local.name_suffix}"
+    foundry            = "ai-${local.app_name}-${local.foundry_suffix}-${local.unique_suffix}"
+    foundry_project    = "proj-${local.app_name}-${local.foundry_suffix}"
     eventhub_namespace = "ehns-${local.app_name}-${local.name_suffix}-${local.unique_suffix}"
     identity_prefix    = "mi-${local.app_name}"
     # Keep the complete Key Vault name within its 24-character limit.
