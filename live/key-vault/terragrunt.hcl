@@ -8,6 +8,21 @@ include "common" {
 terraform {
   source = get_env("LOCAL_MODULES_ROOT", "") != "" ? "${get_env("LOCAL_MODULES_ROOT")}//Security/Keyvault" : "${include.common.locals.iac_modules_repo}//Security/Keyvault?ref=${include.common.locals.module_ref}"
 }
+generate "keyvault_provider_override" {
+  path      = "zz_keyvault_provider_override.tf"
+  if_exists = "overwrite_terragrunt"
+  # Skip purge and its subscription-scoped deleted-vault lookup.
+  # The vault keeps purge protection and its normal soft-delete retention.
+  contents = <<-EOF
+provider "azurerm" {
+  features {
+    key_vault {
+      purge_soft_delete_on_destroy = false
+    }
+  }
+}
+EOF
+}
 inputs = {
   resource_prefix               = include.common.locals.names.keyvault_prefix
   sku_name                      = "standard"
