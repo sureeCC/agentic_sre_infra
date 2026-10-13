@@ -1,8 +1,8 @@
 # Infrastructure deployment setup
 
-Deployment units are in live/. Reusable Terraform modules are in the private sureeCC/agentic_sre_modules repository, pinned by the MODULE_REF commit SHA. Prior application code and legacy Terraform directories are retained; the old combined-state terraform.yml workflow is archived under docs/legacy-workflows and no longer runs.
+Deployment units are in live/. Reusable Terraform modules are in the private sureeCC/agentic_sre_modules repository, pinned by the MODULE_REF commit SHA. Application code remains under applications/. Legacy stacks and duplicated modules have been removed.
 
-Run the Agentic SRE infrastructure workflow from main. Choose dev/qa/prod, one unit, and plan/apply. Apply plans and applies in one job. Configure Environment protection rules before allowing production apply. The workflow refuses subscriptions/tenants other than the authorized personal Azure account.
+Run the Agentic SRE infrastructure workflow from main. Choose dev/qa/prod, one unit or all, and plan/apply/destroy. Validation, planning and execution are separate steps in one job. Configure Environment protection rules before allowing production apply. The workflow refuses subscriptions/tenants other than the authorized personal Azure account.
 
 Create a private blob container named tfstate in each state storage account. A separate lock resource is not needed: the Azure backend uses blob leases. Each unit/environment has its own state key: agentic_sre_infra/<unit>/<environment>/terraform.tfstate. Backends must exist before the pipeline runs. Do not reuse combined legacy state without an explicit state migration.
 
@@ -24,9 +24,9 @@ Secrets: MODULES_READ_TOKEN (fine-grained token with Contents: read for the priv
 
 Configure Azure OIDC federation for this GitHub repository and each Environment. Check the repository's actual OIDC subject format when creating federation; GitHub subject defaults can vary. Give the deployment identity Contributor on the workload RG and Storage Blob Data Contributor on the state container/account. Additional role-assignment permissions are needed if you later add RBAC resources.
 
-The current Azure modules require existing networking and private DNS/RBAC. The GitHub-hosted runner must reach any private data endpoints used by a resource; a connected self-hosted runner may be needed. Deploy managed-identity before foundry. ACR is Premium to support its private endpoint. Backend storage and workload/network settings have not been populated because their names are not yet supplied.
+The current Azure modules require existing networking and private DNS/RBAC. The GitHub-hosted runner must reach any private data endpoints used by a resource; a connected self-hosted runner may be needed. Deploy managed-identity before foundry. ACR is Premium to support its private endpoint. Dev and QA backend/network settings are configured through GitHub Environment variables.
 
-Module initialization/validation passed locally before publication. Outstanding runtime findings remain in the modules repository docs/MODULE-REVIEW.md. This is a pipeline scaffold, not a completed application deployment. No workflow has been dispatched to Azure.
+Module initialization/validation and infrastructure deployments have run. After destruction, reconcile soft-deleted Foundry and Key Vault accounts before reusing their names. Application readiness still requires private DNS, network access and data permissions.
 
 ## Local use
 

@@ -11,10 +11,6 @@ terraform.zip
 plan-check-*.txt
 tfplan-*
 
-# Local Git metadata backups retained during repository consolidation.
-environments/poc/.git.local-backup/
-.local-agentic_sre_infra-backup/
-
 # Application source: never commit local settings, build output, or artifacts.
 applications/**/bin/
 applications/**/obj/
@@ -29,8 +25,6 @@ __pycache__/
 # Variable and backend files can contain tenant, subscription, or secret values
 *.tfvars
 *.tfvars.json
-# Reviewed, non-secret POC configuration is versioned.
-!environments/poc/terraform.tfvars
 backend.hcl
 
 # Keep the dependency lock file in source control
