@@ -17,3 +17,20 @@ inputs = {
   pve_vnet_resource_group_name  = include.common.locals.environment.vnet_resource_group_name
   pve_subnet_name               = include.common.locals.environment.pve_subnet_name
 }
+
+generate "private_dns" {
+  path      = "private-dns.tf"
+  if_exists = "overwrite_terragrunt"
+  contents = templatefile("${get_terragrunt_dir()}/../_templates/private-dns.tf.tftpl", {
+    zones     = jsonencode(["privatelink.azurecr.io"])
+    link_name = jsonencode("link-${include.common.locals.name_suffix}")
+    vnet_id   = jsonencode("/subscriptions/${include.common.inputs.subscription_id}/resourceGroups/${include.common.locals.environment.vnet_resource_group_name}/providers/Microsoft.Network/virtualNetworks/${include.common.locals.environment.vnet_name}")
+  })
+}
+generate "private_dns_endpoint" {
+  path      = "private-dns_override.tf"
+  if_exists = "overwrite_terragrunt"
+  contents = templatefile("${get_terragrunt_dir()}/../_templates/private-dns-override.tf.tftpl", {
+    endpoint_resource = "pvtep_ace"
+  })
+}

@@ -16,6 +16,10 @@ on:
         type: choice
         options: [all, managed-identity, acr, event-hub, key-vault, foundry, database]
         required: true
+      foundry_recovery_lock_id:
+        description: Optional stale Foundry lock ID; use only after its owning run has ended
+        type: string
+        default: ""
 permissions:
   contents: read
   id-token: write
@@ -109,6 +113,17 @@ jobs:
         if: inputs.action == 'import'
         shell: bash
         run: bash scripts/ci/run-infrastructure.sh import
+      - name: Release explicitly selected abandoned Foundry lock
+        if: inputs.foundry_recovery_lock_id != ''
+        shell: bash
+        env:
+          RECOVERY_LOCK_ID: ${{ inputs.foundry_recovery_lock_id }}
+        run: |
+          test "$UNIT" = foundry || test "$UNIT" = all
+          test "$ACTION" = plan || test "$ACTION" = apply
+          [[ "$RECOVERY_LOCK_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
+          cd live/foundry
+          terragrunt run -- force-unlock -force "$RECOVERY_LOCK_ID"
       - name: "Stage 2: Plan"
         shell: bash
         run: bash scripts/ci/run-infrastructure.sh plan

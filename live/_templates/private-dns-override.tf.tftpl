@@ -1,0 +1,7 @@
+# Add DNS integration to the existing endpoint without changing the module.
+resource "azurerm_private_endpoint" "${endpoint_resource}" {
+  private_dns_zone_group {
+    name                 = "default"
+    private_dns_zone_ids = [for zone in azurerm_private_dns_zone.service : zone.id]
+  }
+}
