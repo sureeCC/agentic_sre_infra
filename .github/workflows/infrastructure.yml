@@ -107,13 +107,13 @@ jobs:
         shell: bash
         run: |
           cd "$UNIT"
-          terragrunt run init -input=false
-          terragrunt run validate
-          terragrunt run plan -input=false -out=tfplan
+          terragrunt run -- init -input=false
+          terragrunt run -- validate
+          terragrunt run -- plan -input=false -out=tfplan
       - name: Apply the saved plan
         if: inputs.action == 'apply'
         working-directory: live
         shell: bash
         run: |
           cd "$UNIT"
-          terragrunt run apply -input=false tfplan
+          terragrunt run -- apply -input=false tfplan
