@@ -1,0 +1,34 @@
+# Infrastructure deployment setup
+
+Deployment units are in live/. Reusable Terraform modules are in the private sureeCC/agentic_sre_modules repository, pinned by the MODULE_REF commit SHA. Prior application code and legacy Terraform directories are retained; the old combined-state terraform.yml workflow is archived under docs/legacy-workflows and no longer runs.
+
+Run the Agentic SRE infrastructure workflow from main. Choose dev/qa/prod, one unit, and plan/apply. Apply plans and applies in one job. Configure Environment protection rules before allowing production apply. The workflow refuses subscriptions/tenants other than the authorized personal Azure account.
+
+Create a private blob container named tfstate in each state storage account. A separate lock resource is not needed: the Azure backend uses blob leases. Each unit/environment has its own state key: agentic_sre_infra/<unit>/<environment>/terraform.tfstate. Backends must exist before the pipeline runs. Do not reuse combined legacy state without an explicit state migration.
+
+## GitHub Environment settings
+
+Create dev and prod (or qa if those are your two environments). Each Environment needs variables:
+
+AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+LOCATION, REGION, INSTANCE, RESOURCE_GROUP_NAME,
+VNET_NAME, VNET_RESOURCE_GROUP_NAME, PVE_SUBNET_NAME, SVC_SUBNET_NAME,
+POSTGRES_DNS_ZONE_NAME, POSTGRES_DNS_RESOURCE_GROUP,
+MODEL_NAME, MODEL_VERSION, MODEL_CAPACITY,
+ACR_NAME, FOUNDRY_NAME, FOUNDRY_PROJECT_NAME, EVENTHUB_NAMESPACE_NAME,
+APP, OWNER, PROVISIONED_TIME,
+STATE_RESOURCE_GROUP, STATE_STORAGE_ACCOUNT, STATE_CONTAINER.
+
+MODULE_REF is configured as a repository variable to the module commit; environment overrides are optional. IAC_MODULES_REPO is optional because project.hcl defaults to the new module repository. LOCATION is the Azure location, REGION is a short naming code (eus), INSTANCE is typically 001. PROVISIONED_TIME must be fixed RFC3339 metadata, not a changing timestamp.
+
+Secrets: MODULES_READ_TOKEN (fine-grained token with Contents: read for the private modules repository), POSTGRES_ADMIN_PASSWORD for database. Do not paste or commit secrets. No Azure client secret is needed with OIDC.
+
+Configure Azure OIDC federation for this GitHub repository and each Environment. Check the repository's actual OIDC subject format when creating federation; GitHub subject defaults can vary. Give the deployment identity Contributor on the workload RG and Storage Blob Data Contributor on the state container/account. Additional role-assignment permissions are needed if you later add RBAC resources.
+
+The current Azure modules require existing networking and private DNS/RBAC. The GitHub-hosted runner must reach any private data endpoints used by a resource; a connected self-hosted runner may be needed. Deploy managed-identity before foundry. ACR is Premium to support its private endpoint. Backend storage and workload/network settings have not been populated because their names are not yet supplied.
+
+Module initialization/validation passed locally before publication. Outstanding runtime findings remain in the modules repository docs/MODULE-REVIEW.md. This is a pipeline scaffold, not a completed application deployment. No workflow has been dispatched to Azure.
+
+## Local use
+
+Set LOCAL_MODULES_ROOT to a clone of agentic_sre_modules, with forward slashes. Export the same configuration variables plus BRANCH_NAME and GITHUB_REPOSITORY. Run Terragrunt inside live/<unit>. Keep real remote state for meaningful plans.

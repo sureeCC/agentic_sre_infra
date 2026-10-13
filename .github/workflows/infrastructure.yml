@@ -1,0 +1,130 @@
+name: Agentic SRE infrastructure
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Plan or apply one infrastructure unit
+        type: choice
+        options: [plan, apply]
+        default: plan
+      environment:
+        description: GitHub Environment supplying deployment configuration
+        type: choice
+        options: [dev, qa, prod]
+        default: dev
+      unit:
+        type: choice
+        options: [managed-identity, acr, event-hub, key-vault, foundry, database]
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: infrastructure-${{ inputs.environment }}-${{ inputs.unit }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
+      TG_TF_PATH: terraform
+      TF_IN_AUTOMATION: "true"
+      LOCAL_MODULES_ROOT: ${{ github.workspace }}/.modules
+      POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+      TG_NON_INTERACTIVE: "true"
+      TG_FORWARD_TF_STDOUT: "true"
+      BRANCH_NAME: ${{ inputs.environment }}
+      LOCATION: ${{ vars.LOCATION }}
+      REGION: ${{ vars.REGION }}
+      INSTANCE: ${{ vars.INSTANCE }}
+      RESOURCE_GROUP_NAME: ${{ vars.RESOURCE_GROUP_NAME }}
+      VNET_NAME: ${{ vars.VNET_NAME }}
+      VNET_RESOURCE_GROUP_NAME: ${{ vars.VNET_RESOURCE_GROUP_NAME }}
+      PVE_SUBNET_NAME: ${{ vars.PVE_SUBNET_NAME }}
+      SVC_SUBNET_NAME: ${{ vars.SVC_SUBNET_NAME }}
+      POSTGRES_DNS_ZONE_NAME: ${{ vars.POSTGRES_DNS_ZONE_NAME }}
+      POSTGRES_DNS_RESOURCE_GROUP: ${{ vars.POSTGRES_DNS_RESOURCE_GROUP }}
+      MODEL_NAME: ${{ vars.MODEL_NAME }}
+      MODEL_VERSION: ${{ vars.MODEL_VERSION }}
+      MODEL_CAPACITY: ${{ vars.MODEL_CAPACITY }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      FOUNDRY_NAME: ${{ vars.FOUNDRY_NAME }}
+      FOUNDRY_PROJECT_NAME: ${{ vars.FOUNDRY_PROJECT_NAME }}
+      EVENTHUB_NAMESPACE_NAME: ${{ vars.EVENTHUB_NAMESPACE_NAME }}
+      IAC_MODULES_REPO: ${{ vars.IAC_MODULES_REPO }}
+      MODULE_REF: ${{ vars.MODULE_REF }}
+      APP: ${{ vars.APP }}
+      OWNER: ${{ vars.OWNER }}
+      PROVISIONED_TIME: ${{ vars.PROVISIONED_TIME }}
+      STATE_RESOURCE_GROUP: ${{ vars.STATE_RESOURCE_GROUP }}
+      STATE_STORAGE_ACCOUNT: ${{ vars.STATE_STORAGE_ACCOUNT }}
+      STATE_CONTAINER: ${{ vars.STATE_CONTAINER }}
+      UNIT: ${{ inputs.unit }}
+      ACTION: ${{ inputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check trusted deployment branch
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - name: Check configuration
+        run: bash scripts/ci/check-infrastructure-config.sh
+      - name: Checkout pinned modules
+        uses: actions/checkout@v4
+        with:
+          repository: sureeCC/agentic_sre_modules
+          ref: ${{ env.MODULE_REF }}
+          token: ${{ secrets.MODULES_READ_TOKEN }}
+          persist-credentials: false
+          path: .modules
+      - name: Check environment branch
+        run: |
+          case "$BRANCH_NAME" in dev|qa|prod) ;; *) echo "Select dev, qa or prod branch"; exit 1;; esac
+      - name: Verify personal account target before login
+        run: |
+          test "$ARM_SUBSCRIPTION_ID" = "244b1140-2e3c-4232-8c86-2b77c04ca37e"
+          test "$ARM_TENANT_ID" = "89c39546-9370-4770-a920-ea7f83a9c45e"
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.4
+          terraform_wrapper: false
+      - name: Install pinned Terragrunt
+        shell: bash
+        run: |
+          curl --fail --location --output terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_linux_amd64
+          curl --fail --location --output SHA256SUMS https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/SHA256SUMS
+          expected=$(awk '$2 == "terragrunt_linux_amd64" { print $1 }' SHA256SUMS)
+          test -n "$expected"
+          printf '%s  terragrunt\n' "$expected" | sha256sum --check
+          chmod +x terragrunt
+          sudo mv terragrunt /usr/local/bin/terragrunt
+      - name: Verify scope and configured sources
+        shell: bash
+        run: |
+          test "$ARM_SUBSCRIPTION_ID" = "244b1140-2e3c-4232-8c86-2b77c04ca37e"
+          test "$ARM_TENANT_ID" = "89c39546-9370-4770-a920-ea7f83a9c45e"
+          test "$(az account show --query id -o tsv)" = "$ARM_SUBSCRIPTION_ID"
+          test "$(az account show --query tenantId -o tsv)" = "$ARM_TENANT_ID"
+      - name: Validate and plan
+        working-directory: live
+        shell: bash
+        run: |
+          cd "$UNIT"
+          terragrunt run init -input=false
+          terragrunt run validate
+          terragrunt run plan -input=false -out=tfplan
+      - name: Apply the saved plan
+        if: inputs.action == 'apply'
+        working-directory: live
+        shell: bash
+        run: |
+          cd "$UNIT"
+          terragrunt run apply -input=false tfplan

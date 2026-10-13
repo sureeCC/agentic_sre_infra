@@ -1,3 +1,7 @@
+# Active infrastructure deployment
+
+The current resource-level deployment is in [live](live/) and uses the separate [modules repository](https://github.com/sureeCC/agentic_sre_modules). Read [deployment setup](docs/INFRASTRUCTURE-SETUP.md). Prior combined-state workflows are archived; older instructions below describe the previous layout.
+
 # Agentic SRE Terraform
 
 ## Terragrunt configuration

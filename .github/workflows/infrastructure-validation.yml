@@ -1,0 +1,16 @@
+name: Deployment configuration validation
+on:
+  pull_request:
+    paths: ['live/**', '.github/workflows/infrastructure.yml']
+  push:
+    branches: [main]
+    paths: ['live/**', '.github/workflows/infrastructure.yml']
+permissions:
+  contents: read
+jobs:
+  formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/ci/install-terragrunt.sh
+      - run: terragrunt hcl fmt --check --working-dir live
