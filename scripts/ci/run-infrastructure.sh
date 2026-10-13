@@ -33,8 +33,11 @@ for unit in "${units[@]}"; do
         flags=()
         [[ "$ACTION" != destroy ]] || flags+=(-destroy)
         terragrunt run -- plan -input=false "${flags[@]}" -out="$plan" || exit $?
-        cache_dir=$(find .terragrunt-cache -type f -name .terraform.lock.hcl -printf '%h\n' | head -n 1)
-        [[ -n "$cache_dir" ]] || { echo 'Initialized Terraform cache not found' >&2; exit 1; }
+        # Source downloads also contain other modules' lock files. Only the
+        # executed module has an initialized .terraform directory.
+        mapfile -t cache_dirs < <(find .terragrunt-cache -type d -name .terraform -prune -printf '%h\n')
+        [[ ${#cache_dirs[@]} -eq 1 ]] || { echo 'Expected exactly one initialized Terraform cache' >&2; exit 1; }
+        cache_dir="${cache_dirs[0]}"
         terraform -chdir="$cache_dir" show -json "$plan" |
           node "$repo_root/scripts/ci/infrastructure-summary.cjs" capture "$changes" || exit $?
         node "$repo_root/scripts/ci/infrastructure-summary.cjs" report "$changes" "$unit" plan || exit $? ;;
