@@ -9,8 +9,12 @@ resource "azurerm_private_dns_zone" "service" {
 resource "azurerm_private_dns_zone_virtual_network_link" "service" {
   for_each              = azurerm_private_dns_zone.service
   name                  = ${link_name}
+%{ if zone_id_link ~}
+  private_dns_zone_id   = each.value.id
+%{ else ~}
   resource_group_name   = var.resource_group_name
   private_dns_zone_name = each.value.name
+%{ endif ~}
   virtual_network_id    = ${vnet_id}
   registration_enabled  = false
   tags                  = module.tagging.tags
