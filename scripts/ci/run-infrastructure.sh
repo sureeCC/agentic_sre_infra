@@ -62,7 +62,21 @@ for unit in "${units[@]}"; do
         fi
         if [[ -n "${FOUNDRY_REPLACEMENT_FROM_ID:-}" ]]; then
           terragrunt run -- import -input=false 'azurerm_cognitive_account_project.project["imo"]' "$id/projects/$project_name" || exit $?
-        fi ;;
+        fi
+        # Cancellation may leave completed DNS links outside the last saved
+        # state. Import only the exact configured links to our configured VNet.
+        for zone in privatelink.cognitiveservices.azure.com privatelink.openai.azure.com privatelink.services.ai.azure.com; do
+          address="azurerm_private_dns_zone_virtual_network_link.service[\"$zone\"]"
+          if ! grep -Fxq "$address" <<< "$addresses"; then
+            link="link-${BRANCH_NAME}-${REGION}-${INSTANCE}"
+            link_id="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.Network/privateDnsZones/$zone/virtualNetworkLinks/$link"
+            if actual_vnet=$(az resource show --ids "$link_id" --subscription "$ARM_SUBSCRIPTION_ID" --query properties.virtualNetwork.id -o tsv 2>/dev/null); then
+              expected_vnet="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$VNET_RESOURCE_GROUP_NAME/providers/Microsoft.Network/virtualNetworks/$VNET_NAME"
+              [[ "${actual_vnet,,}" == "${expected_vnet,,}" ]] || { echo 'Existing DNS link points to another VNet; refusing import.' >&2; exit 1; }
+              terragrunt run -- import -input=false "$address" "$link_id" || exit $?
+            fi
+          fi
+        done ;;
       validate)
         terragrunt run -- init -input=false || exit $?
         terragrunt run -- validate || exit $? ;;
