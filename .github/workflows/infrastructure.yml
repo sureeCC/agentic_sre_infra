@@ -94,14 +94,7 @@ jobs:
           terraform_wrapper: false
       - name: Install pinned Terragrunt
         shell: bash
-        run: |
-          curl --fail --location --output terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_linux_amd64
-          curl --fail --location --output SHA256SUMS https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/SHA256SUMS
-          expected=$(awk '$2 == "terragrunt_linux_amd64" { print $1 }' SHA256SUMS)
-          test -n "$expected"
-          printf '%s  terragrunt\n' "$expected" | sha256sum --check
-          chmod +x terragrunt
-          sudo mv terragrunt /usr/local/bin/terragrunt
+        run: bash scripts/ci/install-terragrunt.sh
       - name: Verify scope and configured sources
         shell: bash
         run: |
