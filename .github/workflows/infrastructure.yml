@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: Plan or apply one infrastructure unit
+        description: Plan or apply one unit or all resource units
         type: choice
         options: [plan, apply]
         default: plan
@@ -14,13 +14,13 @@ on:
         default: dev
       unit:
         type: choice
-        options: [managed-identity, acr, event-hub, key-vault, foundry, database]
+        options: [all, managed-identity, acr, event-hub, key-vault, foundry, database]
         required: true
 permissions:
   contents: read
   id-token: write
 concurrency:
-  group: infrastructure-${{ inputs.environment }}-${{ inputs.unit }}
+  group: infrastructure-${{ inputs.environment }}
   cancel-in-progress: false
 jobs:
   deploy:
@@ -102,18 +102,6 @@ jobs:
           test "$ARM_TENANT_ID" = "89c39546-9370-4770-a920-ea7f83a9c45e"
           test "$(az account show --query id -o tsv)" = "$ARM_SUBSCRIPTION_ID"
           test "$(az account show --query tenantId -o tsv)" = "$ARM_TENANT_ID"
-      - name: Validate and plan
-        working-directory: live
+      - name: Validate, plan and optionally apply selected units
         shell: bash
-        run: |
-          cd "$UNIT"
-          terragrunt run -- init -input=false
-          terragrunt run -- validate
-          terragrunt run -- plan -input=false -out=tfplan
-      - name: Apply the saved plan
-        if: inputs.action == 'apply'
-        working-directory: live
-        shell: bash
-        run: |
-          cd "$UNIT"
-          terragrunt run -- apply -input=false tfplan
+        run: bash scripts/ci/run-infrastructure.sh

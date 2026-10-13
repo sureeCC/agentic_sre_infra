@@ -10,6 +10,12 @@ terraform {
 }
 dependency "identity" {
   config_path = "../managed-identity"
+  # Bootstrap plans can preview Foundry before the identity has state outputs.
+  # This is its deterministic future ID, not proof the identity exists.
+  mock_outputs = {
+    managed_identity_id = "/subscriptions/${include.common.inputs.subscription_id}/resourceGroups/${include.common.inputs.resource_group_name}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${include.common.locals.names.identity_prefix}-${include.common.locals.name_suffix}"
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
 inputs = {
   resource_prefix               = "ai-sre"

@@ -48,3 +48,11 @@ Default Dev names with APP=agenticsre, REGION=wus, INSTANCE=001:
 QA substitutes qa for dev. ACR_NAME, FOUNDRY_NAME, FOUNDRY_PROJECT_NAME and EVENTHUB_NAMESPACE_NAME are no longer required GitHub variables. Backend/network names reference resources already provisioned and remain configured. Database DNS settings/password are checked only for database; model settings only for foundry. All units share configuration parsing, with unrelated model/DNS values allowed to be empty.
 
 These naming changes apply to new resources. Review plans carefully before changing names of resources already managed in state: renames can force replacement. Precreated pipeline identities, VNets and state storage retain their existing names.
+
+## All resource units
+
+Choose Unit=all to run managed-identity, event-hub, acr, key-vault, database and foundry sequentially. Each keeps its existing per-unit/environment state blob. Plan runs do not apply anything. Apply runs create a fresh saved plan for each unit and apply it before proceeding, so identity outputs exist when Foundry is planned. Failures stop later units; earlier successful applies remain deployed (there is no automatic rollback).
+
+All requires the database DNS/password and Foundry model configuration in addition to shared settings. Environment-level concurrency prevents all and single-unit runs overlapping. Per-unit results appear in the run summary and grouped logs.
+
+For first-time plans, Foundry may use a deterministic preview identity ID when no managed-identity outputs exist. Mock outputs are allowed only for init/validate/plan, never apply. All-apply replans Foundry using the actual dependency state after managed-identity has been applied.
