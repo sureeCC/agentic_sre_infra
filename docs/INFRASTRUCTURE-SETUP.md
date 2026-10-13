@@ -30,6 +30,8 @@ Module initialization/validation and infrastructure deployments have run. After 
 
 ## Local use
 
+For a recovered Foundry account not tracked in state, select Action=import and Unit=foundry. The workflow verifies the exact configured account exists, imports `azurerm_cognitive_account.foundry` if absent from state, and generates a fresh plan without applying it. Account recovery must happen first; this action does not purge or recover Azure resources. Other units are rejected for import.
+
 Set LOCAL_MODULES_ROOT to a clone of agentic_sre_modules, with forward slashes. Export the same configuration variables plus BRANCH_NAME and GITHUB_REPOSITORY. Run Terragrunt inside live/<unit>. Keep real remote state for meaningful plans.
 
 ## Automatic naming

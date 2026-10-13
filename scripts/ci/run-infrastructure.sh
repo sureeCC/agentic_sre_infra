@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 stage="${1:?Specify validate, plan or apply}"
-case "$stage" in validate|plan|apply) ;; *) echo 'Unknown stage' >&2; exit 1;; esac
-case "${ACTION:-}" in plan|apply|destroy) ;; *) echo 'ACTION must be plan, apply or destroy' >&2; exit 1;; esac
-[[ "$stage" != apply || "$ACTION" != plan ]] || { echo 'Plan-only runs cannot apply' >&2; exit 1; }
+case "$stage" in validate|plan|apply|import) ;; *) echo 'Unknown stage' >&2; exit 1;; esac
+case "${ACTION:-}" in plan|apply|destroy|import) ;; *) echo 'Unknown action' >&2; exit 1;; esac
+[[ "$ACTION" != import || "$UNIT" == foundry ]] || { echo 'Import supports only UNIT=foundry' >&2; exit 1; }
+[[ "$stage" != import || "$ACTION" == import ]] || { echo 'Import requires ACTION=import' >&2; exit 1; }
+[[ "$stage" != apply || "$ACTION" == apply || "$ACTION" == destroy ]] || { echo 'This action cannot apply' >&2; exit 1; }
 case "${UNIT:-}" in
   all)
     units=(managed-identity event-hub acr key-vault database foundry)
@@ -26,6 +28,19 @@ for unit in "${units[@]}"; do
   if (
     cd "$repo_root/live/$unit" || exit $?
     case "$stage" in
+      import)
+        # Import the exact recovered account; never infer or purge other resources.
+        suffix="${ARM_SUBSCRIPTION_ID//-/}"
+        name="ai-${APP,,}-${BRANCH_NAME}-${REGION}-${INSTANCE}-${suffix:0:6}"
+        name="${name,,}"
+        id="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.CognitiveServices/accounts/$name"
+        az resource show --ids "$id" --subscription "$ARM_SUBSCRIPTION_ID" --query id -o tsv >/dev/null || exit $?
+        addresses=$(terragrunt run -- state list) || exit $?
+        if ! grep -Fxq 'azurerm_cognitive_account.foundry' <<< "$addresses"; then
+          terragrunt run -- import -input=false azurerm_cognitive_account.foundry "$id" || exit $?
+        else
+          echo 'Foundry account is already managed; import skipped.'
+        fi ;;
       validate)
         terragrunt run -- init -input=false || exit $?
         terragrunt run -- validate || exit $? ;;

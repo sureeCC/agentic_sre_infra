@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: Plan, apply or destroy one unit or all resource units
+        description: Plan/apply/destroy, or import a recovered Foundry account
         type: choice
-        options: [plan, apply, destroy]
+        options: [plan, apply, destroy, import]
         default: plan
       environment:
         description: GitHub Environment supplying deployment configuration
@@ -105,6 +105,10 @@ jobs:
       - name: "Stage 1: Validate"
         shell: bash
         run: bash scripts/ci/run-infrastructure.sh validate
+      - name: Import recovered Foundry account into state
+        if: inputs.action == 'import'
+        shell: bash
+        run: bash scripts/ci/run-infrastructure.sh import
       - name: "Stage 2: Plan"
         shell: bash
         run: bash scripts/ci/run-infrastructure.sh plan
