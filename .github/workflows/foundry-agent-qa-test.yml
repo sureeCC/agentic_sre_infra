@@ -10,6 +10,6 @@ jobs:
     with:
       runner_name: ubuntu-24.04
       environment_name: qa
-      branch: qa
+      branch: main
       promote_endpoint: true
     secrets: inherit
