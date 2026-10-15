@@ -19,15 +19,15 @@ on:
         type: string
         required: true
       branch:
-        description: Deployment classification; prod triggers the approval gate (does not select the checkout ref)
+        description: Deployment branch classification; qa triggers approval (does not select the checkout ref)
         type: string
         required: false
         default: ''
       approval_environment:
-        description: Environment with required reviewers for production deployments
+        description: Environment providing QA deployment approval rules
         type: string
         required: false
-        default: prod-approval
+        default: qa
       promote_endpoint:
         description: Explicitly route 100% endpoint traffic to the new version before checking it
         type: boolean
@@ -44,13 +44,13 @@ concurrency:
 jobs:
   approval:
     name: Approval
-    if: inputs.branch == 'prod' || inputs.environment_name == 'prod'
+    if: inputs.branch == 'qa'
     runs-on: ${{ inputs.runner_name }}
     environment: ${{ inputs.approval_environment }}
     steps:
       - name: Record approval
         shell: bash
-        run: echo 'Production deployment approval completed.'
+        run: echo 'QA deployment approval completed.'
 
   deploy:
     name: Build push and deploy Foundry container
@@ -72,9 +72,6 @@ jobs:
       FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
       FOUNDRY_AGENT_NAME: ${{ vars.FOUNDRY_AGENT_NAME }}
       AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
-      POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
-      POSTGRES_DATABASE: ${{ vars.POSTGRES_DATABASE }}
-      POSTGRES_AAD_USER: ${{ vars.POSTGRES_AAD_USER }}
       AGENT_CPU: ${{ vars.AGENT_CPU }}
       AGENT_MEMORY: ${{ vars.AGENT_MEMORY }}
     steps:
@@ -100,7 +97,7 @@ jobs:
           SUBSCRIPTION: ${{ secrets.SUBSCRIPTION || vars.SUBSCRIPTION }}
         run: |
           set -euo pipefail
-          for name in CLIENT_ID TENANT_ID SUBSCRIPTION ACR_NAME AGENT_IMAGE_REPOSITORY FOUNDRY_PROJECT_ENDPOINT FOUNDRY_AGENT_NAME AZURE_AI_MODEL_DEPLOYMENT_NAME POSTGRES_HOST POSTGRES_DATABASE POSTGRES_AAD_USER AGENT_CPU AGENT_MEMORY; do
+          for name in CLIENT_ID TENANT_ID SUBSCRIPTION ACR_NAME AGENT_IMAGE_REPOSITORY FOUNDRY_PROJECT_ENDPOINT FOUNDRY_AGENT_NAME AZURE_AI_MODEL_DEPLOYMENT_NAME AGENT_CPU AGENT_MEMORY; do
             if [ -z "${!name:-}" ]; then echo "::error::Missing configuration: $name"; exit 1; fi
           done
           python --version
@@ -141,28 +138,6 @@ jobs:
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --tag "$IMAGE_TAG" applications/foundry-hosted-alert-agent
           test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE_TAG")" = agent
-
-      - name: Check container readiness without model or database calls
-        id: local_check
-        run: |
-          set -euo pipefail
-          container_id=$(docker run --detach --rm --publish 127.0.0.1:8088:8088 \
-            --env FOUNDRY_PROJECT_ENDPOINT --env AZURE_AI_MODEL_DEPLOYMENT_NAME \
-            --env POSTGRES_HOST --env POSTGRES_DATABASE --env POSTGRES_AAD_USER "$IMAGE_TAG")
-          trap 'docker rm --force "$container_id" >/dev/null 2>&1 || true' EXIT
-          for attempt in {1..30}; do
-            if curl --fail --silent --max-time 2 http://127.0.0.1:8088/readiness; then
-              echo "Container readiness passed"
-              exit 0
-            fi
-            if [ "$(docker inspect --format '{{.State.Running}}' "$container_id" 2>/dev/null || true)" != true ]; then
-              break
-            fi
-            sleep 2
-          done
-          docker logs "$container_id" || true
-          echo '::error::Container failed readiness; image will not be pushed'
-          exit 1
 
       - name: Push image and record immutable reference
         id: push

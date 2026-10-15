@@ -2,7 +2,7 @@
 
 The QA caller `.github/workflows/foundry-agent-qa-test.yml` invokes
 `foundry-agent-container-reusable.yml`. Run it manually from GitHub Actions.
-It uses the same QA Environment, OIDC managed identity and production approval
+It uses the same QA Environment, OIDC managed identity and QA-branch approval
 pattern as the source-upload workflow.
 
 The workflow builds `applications/foundry-hosted-alert-agent/Dockerfile` for
@@ -10,11 +10,10 @@ The workflow builds `applications/foundry-hosted-alert-agent/Dockerfile` for
 Responses server on port 8088. Only `main.py` and `requirements.txt` are copied
 into the image. No credentials are provided as build arguments or image layers.
 
-Before pushing, the job starts the image and polls `/readiness`. This checks
-server startup without model inference or a PostgreSQL connection. It then
-pushes a unique commit/run/attempt tag to ACR and deploys the resulting immutable
-`registry/repository@sha256:...` reference. Foundry receives JSON containing
-`container_configuration`, with no source ZIP or `code_configuration`.
+The workflow pushes a unique commit/run/attempt tag to ACR and deploys the resulting
+immutable `registry/repository@sha256:...` reference. There is no local container
+readiness step. Foundry receives JSON containing `container_configuration`,
+with no source ZIP or `code_configuration`.
 
 After Foundry reports `active`, the workflow checks the deployed image and endpoint
 routing, then sends an authenticated, stateless probe through Foundry's Responses
@@ -31,8 +30,7 @@ endpoint that routes to an older/different version.
 
 An `always()` summary records environment, commit, image tag/digest, deployed
 version and every stage's outcome, including skipped stages after a failure.
-Neither the local readiness check nor the deployed probe tests inference or
-PostgreSQL connectivity.
+The deployed probe does not test inference or PostgreSQL connectivity.
 
 ## Configuration
 
@@ -45,8 +43,9 @@ Environment variables:
 - `AGENT_IMAGE_REPOSITORY`: defaults to `sre-alert-postgres-hosted`.
 - `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_AGENT_NAME`.
 - `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `AGENT_CPU`, `AGENT_MEMORY`.
-- `POSTGRES_HOST`, `POSTGRES_DATABASE`, `POSTGRES_AAD_USER`: non-secret runtime
-  settings retained for the application; the deployment test does not use them.
+PostgreSQL settings are neither required nor included in the container deployment
+definition. Configure database access separately before enabling the alert-storage
+application flow.
 
 The pipeline identity needs registry-scoped `AcrPush` and project-scoped
 `Foundry Project Manager`. The Foundry project identity needs registry-scoped
@@ -73,3 +72,8 @@ The pushed agent image is deployed by digest, but reproducible production builds
 also require a dependency lock and a pinned base-image digest.
 
 Reference: https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/deploy-hosted-agent
+
+The approval job runs when the caller supplies `branch: qa` and defaults to the
+`qa` GitHub Environment. Required reviewers must be configured on that Environment
+for a manual approval pause. The branch input is deployment classification; it
+does not change the Git ref checked out by Actions.

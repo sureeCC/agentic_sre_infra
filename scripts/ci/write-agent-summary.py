@@ -8,7 +8,6 @@ STAGES = (
     ("login", "Azure OIDC login"),
     ("registry", "ACR login"),
     ("build", "Docker build"),
-    ("local_check", "Local container readiness"),
     ("push", "ACR push"),
     ("deploy", "Foundry deployment / active status"),
     ("route", "Endpoint promotion (explicit opt-in)"),
@@ -23,7 +22,7 @@ def render(env):
 
     steps = json.loads(env.get("STAGE_RESULTS") or "{}")
     result = value("JOB_STATUS")
-    lines = [f"## Foundry Docker deployment — {result}", "",
+    lines = [f"## Foundry Docker deployment â€” {result}", "",
              f"Environment: **{value('DEPLOYMENT_ENVIRONMENT')}**", "",
              "| Deployment | Value |", "|---|---|",
              f"| Agent | `{value('FOUNDRY_AGENT_NAME')}` |",

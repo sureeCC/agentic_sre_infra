@@ -24,8 +24,7 @@ class ContainerDeploymentTests(unittest.TestCase):
             "FOUNDRY_AGENT_NAME": "test-agent", "ACR_LOGIN_SERVER": "test.azurecr.io",
             "AGENT_IMAGE": "test.azurecr.io/agent@sha256:" + "a" * 64,
             "AGENT_CPU": "0.25", "AGENT_MEMORY": "0.5Gi",
-            "AZURE_AI_MODEL_DEPLOYMENT_NAME": "model", "POSTGRES_HOST": "unused",
-            "POSTGRES_DATABASE": "unused", "POSTGRES_AAD_USER": "unused",
+            "AZURE_AI_MODEL_DEPLOYMENT_NAME": "model",
             "GITHUB_STEP_SUMMARY": "summary.md",
         }
         self.patch = patch.dict(os.environ, self.env, clear=True)
@@ -39,7 +38,7 @@ class ContainerDeploymentTests(unittest.TestCase):
         definition = deploy.definition()
         self.assertNotIn("code_configuration", definition)
         self.assertEqual(definition["container_configuration"], {"image": self.env["AGENT_IMAGE"]})
-        self.assertNotIn("FOUNDRY_PROJECT_ENDPOINT", definition["environment_variables"])
+        self.assertEqual(definition["environment_variables"], {"AZURE_AI_MODEL_DEPLOYMENT_NAME": "model"})
 
     def test_mutable_tag_rejected_before_network(self):
         os.environ["AGENT_IMAGE"] = "test.azurecr.io/agent:latest"

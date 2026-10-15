@@ -49,7 +49,7 @@ def definition():
     result["memory"] = required("AGENT_MEMORY")
     # Foundry injects FOUNDRY_PROJECT_ENDPOINT into hosted containers itself.
     result["environment_variables"] = {key: required(key) for key in (
-        "AZURE_AI_MODEL_DEPLOYMENT_NAME", "POSTGRES_HOST", "POSTGRES_DATABASE", "POSTGRES_AAD_USER",
+        "AZURE_AI_MODEL_DEPLOYMENT_NAME",
     )}
     return result
 
