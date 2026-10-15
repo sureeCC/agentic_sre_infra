@@ -53,12 +53,13 @@ class ContainerDeploymentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             deploy.definition()
 
-    def test_existing_agent_creates_version_and_reports_digest(self):
+    def test_existing_agent_creates_version_and_reports_output(self):
+        os.environ["GITHUB_OUTPUT"] = "outputs.txt"
         with patch.object(deploy, "request", side_effect=[{}, {"version": "3"}, {"status": "active"}]) as request:
             deploy.main()
         self.assertIn("/versions?api-version=v1", request.call_args_list[1].args[0])
         self.assertNotIn("name", request.call_args_list[1].args[2])
-        self.assertIn(self.env["AGENT_IMAGE"], self.summary().write.call_args.args[0])
+        self.assertEqual(self.summary().write.call_args.args[0], "agent_version=3\n")
 
     def test_missing_agent_creates_named_resource(self):
         missing = HTTPError("https://test", 404, "not found", {}, None)

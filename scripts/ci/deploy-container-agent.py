@@ -77,6 +77,9 @@ def main():
     version = result.get("version") or result.get("versions", {}).get("latest", {}).get("version")
     if not version:
         raise RuntimeError("No version in deployment response; inspect Foundry before retrying")
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as outputs:
+            outputs.write(f"agent_version={version}\n")
     print(f"Agent {name}, version {version}, image {required('AGENT_IMAGE')}", flush=True)
     deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
@@ -84,8 +87,6 @@ def main():
         status = result.get("status")
         print(f"Status: {status}", flush=True)
         if status == "active":
-            with open(required("GITHUB_STEP_SUMMARY"), "a", encoding="utf-8") as summary:
-                summary.write(f"### Foundry container deployment\n\nAgent: `{name}`\n\nVersion: `{version}`\n\nImage: `{required('AGENT_IMAGE')}`\n")
             return
         if status == "failed":
             raise RuntimeError(f"Foundry provisioning failed: {result.get('error')}")

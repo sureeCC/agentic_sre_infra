@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from contextlib import AsyncExitStack
 from types import TracebackType
 from typing import Annotated
 
 import psycopg
-from agent_framework import Agent, tool
+from agent_framework import Agent, AgentContext, AgentResponse, AgentResponseUpdate, Content, Message, ResponseStream, agent_middleware, tool
 from agent_framework.foundry import FoundryChatClient
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.ai.agentserver.core import AgentConfig, get_request_context
@@ -18,6 +19,24 @@ from azure.identity.aio import AzureCliCredential, ManagedIdentityCredential
 from pydantic import Field
 
 POSTGRES_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
+
+
+@agent_middleware
+async def deployment_healthcheck(context: AgentContext, call_next) -> None:
+    """Answer a deployment probe without model inference or database access."""
+    last = context.messages[-1] if context.messages else None
+    match = re.fullmatch(r"__deployment_healthcheck__:([a-f0-9]{32})", last.text) if last and last.role == "user" else None
+    if not match:
+        await call_next()
+        return
+    text = f"DEPLOYMENT_OK:{match.group(1)}:{os.environ.get('FOUNDRY_AGENT_VERSION', 'local')}"
+    result = AgentResponse(messages=[Message("assistant", [text])])
+    if context.stream:
+        async def updates():
+            yield AgentResponseUpdate(role="assistant", contents=[Content.from_text(text)])
+        context.result = ResponseStream(updates(), finalizer=lambda _: result)
+    else:
+        context.result = result
 
 
 def _hosted_credential() -> ManagedIdentityCredential | AzureCliCredential:
@@ -97,6 +116,7 @@ def create_agent() -> Agent:
             "alert JSON unchanged and the JSON analysis. Do not return sensitive credentials."
         ),
         tools=[store_alert],
+        middleware=[deployment_healthcheck],
     )
 
 

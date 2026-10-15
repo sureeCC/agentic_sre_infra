@@ -88,6 +88,7 @@ jobs:
           python-version: '3.13'
 
       - name: Validate configuration and tooling
+        id: validate
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID || vars.CLIENT_ID }}
           TENANT_ID: ${{ secrets.TENANT_ID || vars.TENANT_ID }}
@@ -107,8 +108,10 @@ jobs:
           test -f scripts/ci/deploy-container-agent.py
           test -f applications/foundry-hosted-alert-agent/metadata.json
           python scripts/ci/test-container-deployment.py
+          python scripts/ci/test-post-deployment.py
 
       - name: Azure login using managed identity federation
+        id: login
         uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
           client-id: ${{ secrets.CLIENT_ID || vars.CLIENT_ID }}
@@ -116,6 +119,7 @@ jobs:
           subscription-id: ${{ secrets.SUBSCRIPTION || vars.SUBSCRIPTION }}
 
       - name: Resolve registry and authenticate Docker
+        id: registry
         run: |
           set -euo pipefail
           registry=$(az acr show --name "$ACR_NAME" --query loginServer --output tsv)
@@ -125,6 +129,7 @@ jobs:
           az acr login --name "$ACR_NAME"
 
       - name: Build Linux Docker image
+        id: build
         run: |
           set -euo pipefail
           docker build --pull --platform linux/amd64 \
@@ -133,6 +138,7 @@ jobs:
           test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE_TAG")" = agent
 
       - name: Check container readiness without model or database calls
+        id: local_check
         run: |
           set -euo pipefail
           container_id=$(docker run --detach --rm --publish 127.0.0.1:8088:8088 \
@@ -154,18 +160,43 @@ jobs:
           exit 1
 
       - name: Push image and record immutable reference
+        id: push
         run: |
           set -euo pipefail
           docker push "$IMAGE_TAG"
           image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG")
           [[ "$image" == "$ACR_LOGIN_SERVER/$AGENT_IMAGE_REPOSITORY@sha256:"* ]]
           echo "AGENT_IMAGE=$image" >> "$GITHUB_ENV"
-          echo "Pushed image: $image" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed image: $image"
 
       - name: Deploy image to Foundry and wait for active version
+        id: deploy
         run: python scripts/ci/deploy-container-agent.py
 
+      - name: Verify deployed agent through Foundry endpoint
+        id: post_check
+        timeout-minutes: 8
+        env:
+          DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
+        run: python scripts/ci/check-deployed-agent.py
+
       - name: Clear registry login
+        id: registry_logout
         if: always()
         run: |
           if [ -n "${ACR_LOGIN_SERVER:-}" ]; then docker logout "$ACR_LOGIN_SERVER"; fi
+
+      - name: Write pipeline summary
+        if: always()
+        env:
+          STAGE_RESULTS: ${{ toJSON(steps) }}
+          JOB_STATUS: ${{ job.status }}
+          DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment_name }}
+          DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
+        run: |
+          if command -v python >/dev/null && [ -f scripts/ci/write-agent-summary.py ]; then
+            python scripts/ci/write-agent-summary.py
+          else
+            echo '## Foundry deployment summary' >> "$GITHUB_STEP_SUMMARY"
+            echo "Job: $JOB_STATUS. Detailed summary unavailable because checkout or Python setup failed." >> "$GITHUB_STEP_SUMMARY"
+          fi

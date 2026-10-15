@@ -16,6 +16,18 @@ pushes a unique commit/run/attempt tag to ACR and deploys the resulting immutabl
 `registry/repository@sha256:...` reference. Foundry receives JSON containing
 `container_configuration`, with no source ZIP or `code_configuration`.
 
+After Foundry reports `active`, the workflow checks the deployed image and endpoint
+routing, then sends an authenticated, stateless probe through Foundry's Responses
+endpoint. Agent middleware echoes the probe nonce and actual running version
+without calling the model or `store_alert`. A wrong image, stale route, unexpected
+response or failed request fails the job. Only transient errors on this
+side-effect-free probe are retried, at most three times.
+
+An `always()` summary records environment, commit, image tag/digest, deployed
+version and every stage's outcome, including skipped stages after a failure.
+Neither the local readiness check nor the deployed probe tests inference or
+PostgreSQL connectivity.
+
 ## Configuration
 
 QA Environment secrets: `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION`.
