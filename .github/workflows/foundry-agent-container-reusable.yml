@@ -44,13 +44,13 @@ concurrency:
 jobs:
   approval:
     name: Approval
-    if: inputs.branch == 'qa'
+    if: inputs.branch == 'main'
     runs-on: ${{ inputs.runner_name }}
     environment: ${{ inputs.approval_environment }}
     steps:
       - name: Record approval
         shell: bash
-        run: echo 'QA deployment approval completed.'
+        run: echo 'Master deployment approval completed.'
 
   deploy:
     name: Build push and deploy Foundry container
