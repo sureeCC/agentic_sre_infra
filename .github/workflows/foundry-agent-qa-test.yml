@@ -1,4 +1,4 @@
-name: QA Foundry agent deployment test
+name: QA Foundry Docker deployment test
 on:
   workflow_dispatch:
 permissions:
@@ -6,7 +6,7 @@ permissions:
   id-token: write
 jobs:
   deploy:
-    uses: ./.github/workflows/foundry-agent-reusable.yml
+    uses: ./.github/workflows/foundry-agent-container-reusable.yml
     with:
       runner_name: ubuntu-24.04
       environment_name: qa
