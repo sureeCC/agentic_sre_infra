@@ -1,7 +1,6 @@
 """Deploy a digest-pinned ACR image to Foundry; never retry ambiguous writes."""
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import time
@@ -28,7 +27,8 @@ def request(url, method="GET", body=None):
     try:
         with urlopen(Request(url, data=None if body is None else json.dumps(body).encode(),
                              headers=headers, method=method), timeout=120) as response:
-            return json.load(response)
+            data = response.read()
+            return json.loads(data) if data else {}
     except HTTPError as error:
         if error.code != 404:
             print(f"Foundry API HTTP {error.code}: {error.read().decode(errors='replace')}", flush=True)
@@ -42,16 +42,17 @@ def definition():
         raise ValueError("Expected an Azure public-cloud ACR login server")
     if not re.fullmatch(re.escape(registry) + r"/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}", image):
         raise ValueError("AGENT_IMAGE must reference the configured ACR by immutable sha256 digest")
-    result = json.loads(Path("applications/foundry-hosted-alert-agent/metadata.json").read_text())["definition"]
-    result.pop("code_configuration", None)
-    result["container_configuration"] = {"image": image}
-    result["cpu"] = required("AGENT_CPU")
-    result["memory"] = required("AGENT_MEMORY")
     # Foundry injects FOUNDRY_PROJECT_ENDPOINT into hosted containers itself.
-    result["environment_variables"] = {key: required(key) for key in (
-        "AZURE_AI_MODEL_DEPLOYMENT_NAME",
-    )}
-    return result
+    return {
+        "kind": "hosted",
+        "protocol_versions": [{"protocol": "responses", "version": "2.0.0"}],
+        "container_configuration": {"image": image},
+        "cpu": required("AGENT_CPU"),
+        "memory": required("AGENT_MEMORY"),
+        "environment_variables": {
+            "AZURE_AI_MODEL_DEPLOYMENT_NAME": required("AZURE_AI_MODEL_DEPLOYMENT_NAME"),
+        },
+    }
 
 
 def main():

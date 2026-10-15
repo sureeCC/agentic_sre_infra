@@ -12,22 +12,21 @@ The Function App must already exist. Configure mandatory Entra App Service Authe
 
 ## Foundry hosted alert agent
 
-Workflow: `.github/workflows/ai-agent.yml`.
+PR validation: `.github/workflows/ai-agent.yml` runs offline deployment tests, builds
+and validates the Linux Docker image without Azure credentials or deployment.
 
-The package job checks Python dependencies and packages source with `scripts/ci/package-agent.py`. Deployment uses `scripts/ci/deploy-agent.py`, creates an agent version and waits for active provisioning.
+Deployment: `.github/workflows/foundry-agent-qa-test.yml` calls the single reusable
+`.github/workflows/foundry-agent-container-reusable.yml` from `main`. It builds and
+pushes to ACR, deploys an immutable image digest, waits for active status, optionally
+promotes the endpoint and checks the actual running version. No source packaging
+or remote source build is used. See [Docker deployment](FOUNDRY-CONTAINER-DEPLOYMENT.md)
+for the caller and all environment settings.
 
-Configure the `agent-poc` GitHub environment with the three Azure identity variables, OIDC federation, project deployment permissions and:
-
-| Variable | Purpose |
-|---|---|
-| `FOUNDRY_PROJECT_ENDPOINT` | Existing Foundry project HTTPS endpoint |
-| `FOUNDRY_AGENT_NAME` | Agent name matching the Function application setting |
-| `AZURE_AI_MODEL_DEPLOYMENT_NAME` | Existing model deployment name |
-| `POSTGRES_HOST`, `POSTGRES_DATABASE` | Database connection target |
-| `POSTGRES_AAD_USER` | Provisioned Entra database role for the agent |
-| `AGENT_CPU`, `AGENT_MEMORY` | Supported hosted-agent resource tier |
-
-The agent code expects Entra authentication to PostgreSQL. The current database infrastructure uses password authentication; enable and configure Entra access before running this application. Create the database role, required table and permissions separately. Active provisioning does not prove model inference or database writes work. See the [agent README](../applications/foundry-hosted-alert-agent/README.md).
+The deployed probe does not invoke the model or write alerts. Before enabling
+alert processing, configure the agent runtime's PostgreSQL settings, Entra database
+role, schema, permissions and private network access. The Docker deployment currently
+passes only the model setting; database-dependent alert processing is not yet
+configured by this workflow. See the [agent README](../applications/foundry-hosted-alert-agent/README.md).
 
 ## Deployment order
 

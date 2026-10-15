@@ -60,12 +60,30 @@ Foundry network connectivity. QA's public-access test exceptions are Azure-side
 changes; the current Terragrunt inputs still disable public access and will
 restore it on a later apply.
 
-The optional `image_name` input is the **job execution container**, not the agent
-image. Normally leave it empty on `ubuntu-24.04`; a supplied job container must
-have Python 3.13, Azure CLI, Docker CLI and access to a working Docker daemon.
+The reusable workflow runs directly on a Linux runner with a Docker daemon, Azure
+CLI and Python 3.13. Its only inputs are `environment_name` (required), `runner_name`
+(default `ubuntu-24.04`) and `promote_endpoint` (default `false`).
 
-The older source-code reusable workflow and its packaging helper remain
-available. The Docker workflow uses `deploy-container-agent.py` instead.
+```yaml
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  deploy:
+    uses: ./.github/workflows/foundry-agent-container-reusable.yml
+    with:
+      environment_name: qa
+      runner_name: ubuntu-24.04
+      promote_endpoint: true
+    secrets: inherit
+```
+
+The PR-only `ai-agent.yml` checks deployment scripts, builds the Docker image and
+checks agent imports. It does not authenticate to Azure, push or deploy images.
+Source-upload workflows, packaging helpers and source-build manifests have been
+removed. Existing callers of `foundry-agent-reusable.yml` must switch to the Docker
+reusable workflow. The unused job-container input `image_name` was also removed.
+Docker authentication uses a run-specific directory and is logged out after the run.
 
 Dependencies and the base-image tag are currently resolved during the build.
 The pushed agent image is deployed by digest, but reproducible production builds
@@ -73,6 +91,6 @@ also require a dependency lock and a pinned base-image digest.
 
 Reference: https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/deploy-hosted-agent
 
-Both reusable agent workflows deploy only when the caller ref is `refs/heads/main`.
+The reusable Docker workflow deploys only when the caller ref is `refs/heads/main`.
 Environment names select configuration, not Git branches. GitHub Environment
 protection rules, if configured later, still apply to the deployment job.

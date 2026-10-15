@@ -1,5 +1,7 @@
 """Offline checks for image deployment payloads and failure handling."""
 import importlib.util
+import io
+import json
 import os
 from pathlib import Path
 import unittest
@@ -39,6 +41,18 @@ class ContainerDeploymentTests(unittest.TestCase):
         self.assertNotIn("code_configuration", definition)
         self.assertEqual(definition["container_configuration"], {"image": self.env["AGENT_IMAGE"]})
         self.assertEqual(definition["environment_variables"], {"AZURE_AI_MODEL_DEPLOYMENT_NAME": "model"})
+
+    def test_empty_api_response_is_accepted(self):
+        with patch.object(deploy.subprocess, "check_output", return_value="token"), patch.object(
+            deploy, "urlopen", return_value=io.BytesIO(b"")
+        ):
+            self.assertEqual(deploy.request("https://test", "PATCH", {}), {})
+
+    def test_json_api_response_is_parsed(self):
+        with patch.object(deploy.subprocess, "check_output", return_value="token"), patch.object(
+            deploy, "urlopen", return_value=io.BytesIO(json.dumps({"version": "4"}).encode())
+        ):
+            self.assertEqual(deploy.request("https://test"), {"version": "4"})
 
     def test_mutable_tag_rejected_before_network(self):
         os.environ["AGENT_IMAGE"] = "test.azurecr.io/agent:latest"
