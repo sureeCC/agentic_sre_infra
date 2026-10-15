@@ -28,6 +28,11 @@ on:
         type: string
         required: false
         default: prod-approval
+      promote_endpoint:
+        description: Explicitly route 100% endpoint traffic to the new version before checking it
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -172,6 +177,13 @@ jobs:
       - name: Deploy image to Foundry and wait for active version
         id: deploy
         run: python scripts/ci/deploy-container-agent.py
+
+      - name: Promote endpoint to deployed version
+        id: route
+        if: inputs.promote_endpoint
+        env:
+          DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
+        run: python scripts/ci/check-deployed-agent.py --promote
 
       - name: Verify deployed agent through Foundry endpoint
         id: post_check

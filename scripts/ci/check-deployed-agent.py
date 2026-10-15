@@ -1,5 +1,6 @@
 """Check the deployed version and call its stateless deployment probe via Foundry."""
 import importlib.util
+import argparse
 from pathlib import Path
 import time
 from urllib.error import HTTPError, URLError
@@ -10,7 +11,7 @@ deploy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(deploy)
 
 
-def check():
+def deployed_version():
     endpoint = deploy.required("FOUNDRY_PROJECT_ENDPOINT").rstrip("/")
     name = deploy.required("FOUNDRY_AGENT_NAME")
     version = deploy.required("DEPLOYED_AGENT_VERSION")
@@ -19,6 +20,23 @@ def check():
         raise RuntimeError("Deployed version is not active")
     if info.get("definition", {}).get("container_configuration", {}).get("image") != deploy.required("AGENT_IMAGE"):
         raise RuntimeError("Deployed version does not reference the expected image digest")
+    return endpoint, name, version
+
+
+def promote():
+    endpoint, name, version = deployed_version()
+    deploy.request(f"{endpoint}/agents/{name}?api-version=v1", "PATCH", {
+        "agent_endpoint": {
+            "version_selector": {"version_selection_rules": [
+                {"type": "FixedRatio", "agent_version": version, "traffic_percentage": 100}]},
+            "protocol_configuration": {"responses": {}},
+        },
+    })
+    print(f"Agent endpoint promoted to version {version} (100% traffic)")
+
+
+def check():
+    endpoint, name, version = deployed_version()
     agent = deploy.request(f"{endpoint}/agents/{name}?api-version=v1")
     rules = ((agent.get("agent_endpoint") or {}).get("version_selector") or {}).get("version_selection_rules", [])
     if rules:
@@ -57,4 +75,7 @@ def check():
 
 
 if __name__ == "__main__":
-    check()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--promote", action="store_true", help="Explicitly route 100%% endpoint traffic to the deployed version")
+    args = parser.parse_args()
+    promote() if args.promote else check()

@@ -77,6 +77,14 @@ class PostDeploymentTests(unittest.TestCase):
                 probe.check()
         self.assertEqual(request.call_count, 2)
 
+    def test_explicit_promotion_targets_verified_version(self):
+        with patch.object(probe.deploy, "request", side_effect=[self.info, {}]) as request:
+            probe.promote()
+        self.assertEqual(request.call_args.args[1], "PATCH")
+        rule = request.call_args.args[2]["agent_endpoint"]["version_selector"]["version_selection_rules"][0]
+        self.assertEqual(rule["agent_version"], "4")
+        self.assertEqual(rule["traffic_percentage"], 100)
+
     def test_failure_summary_shows_skipped_stages(self):
         text = summary.render({"JOB_STATUS": "failure", "STAGE_RESULTS": json.dumps({
             "build": {"outcome": "failure"}, "post_check": {"outcome": "skipped"}})})

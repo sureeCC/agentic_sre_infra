@@ -23,6 +23,12 @@ without calling the model or `store_alert`. A wrong image, stale route, unexpect
 response or failed request fails the job. Only transient errors on this
 side-effect-free probe are retried, at most three times.
 
+The QA caller explicitly sets `promote_endpoint: true` to route 100% of endpoint
+traffic to the deployed version before probing it. The reusable input defaults
+to false: callers with protected or split production routing must handle
+promotion deliberately. Without promotion the check fails before invoking an
+endpoint that routes to an older/different version.
+
 An `always()` summary records environment, commit, image tag/digest, deployed
 version and every stage's outcome, including skipped stages after a failure.
 Neither the local readiness check nor the deployed probe tests inference or

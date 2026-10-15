@@ -11,6 +11,7 @@ STAGES = (
     ("local_check", "Local container readiness"),
     ("push", "ACR push"),
     ("deploy", "Foundry deployment / active status"),
+    ("route", "Endpoint promotion (explicit opt-in)"),
     ("post_check", "Deployed endpoint / version check"),
     ("registry_logout", "Registry logout"),
 )
