@@ -119,6 +119,26 @@ jobs:
           tenant-id: ${{ secrets.TENANT_ID || vars.TENANT_ID }}
           subscription-id: ${{ secrets.SUBSCRIPTION || vars.SUBSCRIPTION }}
 
+      - name: Inspect previously uploaded source package
+        run: |
+          python - <<'PY'
+          import hashlib, io, json, os, subprocess, urllib.request, urllib.error, zipfile
+          token = subprocess.check_output(["az", "account", "get-access-token", "--resource", "https://ai.azure.com", "--query", "accessToken", "-o", "tsv"], text=True).strip()
+          endpoint = os.environ["FOUNDRY_PROJECT_ENDPOINT"].rstrip("/")
+          name = os.environ["FOUNDRY_AGENT_NAME"]
+          req = urllib.request.Request(f"{endpoint}/agents/{name}/code:download?api-version=v1", headers={"Authorization": f"Bearer {token}", "Accept": "application/zip"})
+          try:
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  code = response.read()
+              with zipfile.ZipFile(io.BytesIO(code)) as archive:
+                  print("Stored source SHA256:", hashlib.sha256(code).hexdigest())
+                  print("Stored source entries:", [(i.filename, oct(i.external_attr >> 16), i.file_size) for i in archive.infolist()])
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+              print("No previous source package exists")
+          PY
+
       - name: Deploy and wait for active version
         run: python scripts/ci/deploy-agent.py
 
