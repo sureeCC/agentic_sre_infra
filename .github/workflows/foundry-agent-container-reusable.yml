@@ -18,16 +18,6 @@ on:
         description: GitHub environment providing vars and deployment protection
         type: string
         required: true
-      branch:
-        description: Deployment branch classification; qa triggers approval (does not select the checkout ref)
-        type: string
-        required: false
-        default: ''
-      approval_environment:
-        description: Environment providing QA deployment approval rules
-        type: string
-        required: false
-        default: qa
       promote_endpoint:
         description: Explicitly route 100% endpoint traffic to the new version before checking it
         type: boolean
@@ -42,20 +32,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  approval:
-    name: Approval
-    if: inputs.branch == 'main'
-    runs-on: ${{ inputs.runner_name }}
-    environment: ${{ inputs.approval_environment }}
-    steps:
-      - name: Record approval
-        shell: bash
-        run: echo 'Master deployment approval completed.'
-
   deploy:
     name: Build push and deploy Foundry container
-    needs: [approval]
-    if: ${{ !cancelled() && (needs.approval.result == 'success' || needs.approval.result == 'skipped') }}
+    if: github.ref == 'refs/heads/main'
     runs-on: ${{ inputs.runner_name }}
     environment: ${{ inputs.environment_name }}
     timeout-minutes: 45

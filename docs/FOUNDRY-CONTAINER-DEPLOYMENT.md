@@ -2,8 +2,8 @@
 
 The QA caller `.github/workflows/foundry-agent-qa-test.yml` invokes
 `foundry-agent-container-reusable.yml`. Run it manually from GitHub Actions.
-It uses the same QA Environment, OIDC managed identity and QA-branch approval
-pattern as the source-upload workflow.
+It deploys from the main trunk using the QA Environment and OIDC managed identity.
+There is no separate approval job; build, push, deploy and verification run consecutively.
 
 The workflow builds `applications/foundry-hosted-alert-agent/Dockerfile` for
 `linux/amd64`. The image runs Python 3.13 as an unprivileged user and starts the
@@ -73,7 +73,6 @@ also require a dependency lock and a pinned base-image digest.
 
 Reference: https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/deploy-hosted-agent
 
-The approval job runs when the caller supplies `branch: qa` and defaults to the
-`qa` GitHub Environment. Required reviewers must be configured on that Environment
-for a manual approval pause. The branch input is deployment classification; it
-does not change the Git ref checked out by Actions.
+Both reusable agent workflows deploy only when the caller ref is `refs/heads/main`.
+Environment names select configuration, not Git branches. GitHub Environment
+protection rules, if configured later, still apply to the deployment job.
