@@ -1,6 +1,11 @@
 name: QA Foundry Docker deployment test
 on:
   workflow_dispatch:
+    inputs:
+      promote_endpoint:
+        description: Route endpoint traffic to the deployed version
+        type: boolean
+        default: true
 permissions:
   contents: read
   id-token: write
@@ -110,5 +115,5 @@ jobs:
       agent_image: ${{ needs.build.outputs.agent_image }}
       acr_login_server: ${{ needs.build.outputs.acr_login_server }}
       image_tag: ${{ needs.build.outputs.image_tag }}
-      promote_endpoint: true
+      promote_endpoint: ${{ inputs.promote_endpoint }}
     secrets: inherit
