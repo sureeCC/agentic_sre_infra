@@ -26,9 +26,10 @@ the separate agent image.
    job starts; a job cannot build the container it is already running inside.
 4. The QA caller passes `image_name: ${{ vars.CI_RUNNER_IMAGE }}` to the reusable
    workflow. PR validation also uses that image.
-5. Run the QA deployment workflow. Its validation step checks `/.dockerenv` and
-   tool versions, then uses the existing Azure OIDC credentials, Docker build,
-   ACR push, Foundry deployment, post-deployment check and summary.
+5. Run the normal QA workflow. Its build job builds and pushes the agent image,
+   then passes the digest to the deployment-only reusable workflow. Validation checks `/.dockerenv` and
+   tool versions, then uses Azure OIDC for Foundry deployment, the post-deployment
+   check and summary. The reusable template does not build or push images.
 
 The bootstrap image build also executes in a Docker job container (`docker:28-cli`).
 It uses shell-only checkout/build/login commands, avoiding JavaScript actions in
@@ -38,10 +39,10 @@ baked into it.
 
 ## Docker access and the organization VM
 
-The CI image has the Docker **client**, not a running Docker daemon. The job mounts
+The CI image has the Docker **client**, not a running Docker daemon. Only the normal workflow build job mounts
 `/var/run/docker.sock` from the Linux VM. Build/push commands run in the job
 container and send requests to the VM's Docker Engine. Agent import checks start
-a sibling container through that same engine. This is socket sharing, not Docker
+a sibling container through that same engine. The deployment-only job has no Docker socket mount. This is socket sharing, not Docker
 in Docker, and needs no privileged DinD service.
 
 The VM needs Docker Engine and a registered GitHub Actions runner. The runner

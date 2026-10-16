@@ -4,7 +4,7 @@ import os
 
 
 STAGES = (
-    ("validate", "Configuration and offline tests"),
+    ("validate", "Deployment configuration"),
     ("login", "Azure OIDC login"),
     ("registry", "ACR login"),
     ("build", "Docker build"),
@@ -34,6 +34,8 @@ def render(env):
              f"| Source commit | `{value('GITHUB_SHA')}` |", "",
              "| Pipeline stage | Result |", "|---|---|"]
     for stage, title in STAGES:
+        if stage in {"registry", "build", "push", "registry_logout"} and stage not in steps:
+            continue
         lines.append(f"| {title} | {steps.get(stage, {}).get('outcome', 'not reached')} |")
     lines.extend(["", "The deployed check validates authenticated Foundry routing, the expected image, "
                   "and a nonce echoed by the expected running agent version.", "",

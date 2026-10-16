@@ -17,6 +17,19 @@ on:
         description: GitHub environment providing vars and deployment protection
         type: string
         required: true
+      agent_image:
+        description: Previously pushed ACR image reference pinned by sha256 digest
+        type: string
+        required: true
+      acr_login_server:
+        description: ACR login server hosting the agent image
+        type: string
+        required: true
+      image_tag:
+        description: Original build tag for the deployment summary
+        type: string
+        required: false
+        default: ''
       promote_endpoint:
         description: Explicitly route 100% endpoint traffic to the new version before checking it
         type: boolean
@@ -45,14 +58,12 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build push and deploy Foundry container
+    name: Deploy Foundry container
     if: github.ref == 'refs/heads/main'
     runs-on: ${{ inputs.runner_name }}
     container:
       image: ${{ inputs.image_name }}
       credentials: ${{ fromJSON(secrets.CI_REGISTRY_USERNAME != '' && format('{{"username":{0},"password":{1}}}', toJSON(secrets.CI_REGISTRY_USERNAME), toJSON(secrets.CI_REGISTRY_PASSWORD)) || '{}') }}
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
     environment: ${{ inputs.environment_name }}
     timeout-minutes: 45
     permissions:
@@ -64,8 +75,9 @@ jobs:
     env:
       CI_TOOLS_IMAGE: ${{ inputs.image_name }}
       AZURE_CONFIG_DIR: /tmp/foundry-azure-${{ github.run_id }}-${{ github.run_attempt }}
-      ACR_NAME: ${{ vars.ACR_NAME }}
-      AGENT_IMAGE_REPOSITORY: ${{ vars.AGENT_IMAGE_REPOSITORY || 'sre-alert-postgres-hosted' }}
+      AGENT_IMAGE: ${{ inputs.agent_image }}
+      ACR_LOGIN_SERVER: ${{ inputs.acr_login_server }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
       FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
       FOUNDRY_AGENT_NAME: ${{ vars.FOUNDRY_AGENT_NAME }}
       AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
@@ -88,7 +100,7 @@ jobs:
           SUBSCRIPTION: ${{ secrets.SUBSCRIPTION || vars.SUBSCRIPTION }}
         run: |
           set -euo pipefail
-          for name in CLIENT_ID TENANT_ID SUBSCRIPTION ACR_NAME AGENT_IMAGE_REPOSITORY FOUNDRY_PROJECT_ENDPOINT FOUNDRY_AGENT_NAME AZURE_AI_MODEL_DEPLOYMENT_NAME AGENT_CPU AGENT_MEMORY; do
+          for name in CLIENT_ID TENANT_ID SUBSCRIPTION AGENT_IMAGE ACR_LOGIN_SERVER FOUNDRY_PROJECT_ENDPOINT FOUNDRY_AGENT_NAME AZURE_AI_MODEL_DEPLOYMENT_NAME AGENT_CPU AGENT_MEMORY; do
             if [ -z "${!name:-}" ]; then echo "::error::Missing configuration: $name"; exit 1; fi
           done
           test -f /.dockerenv
@@ -96,13 +108,8 @@ jobs:
           python --version
           python -c 'import sys; assert sys.version_info[:2] == (3, 13), "Python 3.13 required"'
           az version --output none
-          docker version
-          [[ "$ACR_NAME" =~ ^[a-z0-9]+$ ]]
-          [[ "$AGENT_IMAGE_REPOSITORY" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]]
-          test -f applications/foundry-hosted-alert-agent/Dockerfile
           test -f scripts/ci/deploy-container-agent.py
-          python scripts/ci/test-container-deployment.py
-          python scripts/ci/test-post-deployment.py
+          python -c 'import runpy; runpy.run_path("scripts/ci/deploy-container-agent.py")["definition"]()'
 
       - name: Azure login using managed identity federation
         id: login
@@ -111,38 +118,6 @@ jobs:
           client-id: ${{ secrets.CLIENT_ID || vars.CLIENT_ID }}
           tenant-id: ${{ secrets.TENANT_ID || vars.TENANT_ID }}
           subscription-id: ${{ secrets.SUBSCRIPTION || vars.SUBSCRIPTION }}
-
-      - name: Resolve registry and authenticate Docker
-        id: registry
-        run: |
-          set -euo pipefail
-          export DOCKER_CONFIG="$RUNNER_TEMP/foundry-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
-          registry=$(az acr show --name "$ACR_NAME" --query loginServer --output tsv)
-          [[ "$registry" =~ ^[a-z0-9]+\.azurecr\.io$ ]]
-          echo "ACR_LOGIN_SERVER=$registry" >> "$GITHUB_ENV"
-          echo "IMAGE_TAG=$registry/$AGENT_IMAGE_REPOSITORY:$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
-          az acr login --name "$ACR_NAME"
-
-      - name: Build Linux Docker image
-        id: build
-        run: |
-          set -euo pipefail
-          docker build --pull --platform linux/amd64 \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            --tag "$IMAGE_TAG" applications/foundry-hosted-alert-agent
-          test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE_TAG")" = agent
-          docker run --rm --entrypoint python "$IMAGE_TAG" -c 'import main'
-
-      - name: Push image and record immutable reference
-        id: push
-        run: |
-          set -euo pipefail
-          docker push "$IMAGE_TAG"
-          image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG")
-          [[ "$image" == "$ACR_LOGIN_SERVER/$AGENT_IMAGE_REPOSITORY@sha256:"* ]]
-          echo "AGENT_IMAGE=$image" >> "$GITHUB_ENV"
-          echo "Pushed image: $image"
 
       - name: Deploy image to Foundry and wait for active version
         id: deploy
@@ -161,12 +136,6 @@ jobs:
         env:
           DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
         run: python scripts/ci/check-deployed-agent.py
-
-      - name: Clear registry login
-        id: registry_logout
-        if: always()
-        run: |
-          if [ -n "${ACR_LOGIN_SERVER:-}" ]; then docker logout "$ACR_LOGIN_SERVER"; fi
 
       - name: Write pipeline summary
         if: always()

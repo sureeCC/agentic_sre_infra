@@ -1,17 +1,19 @@
 # Foundry Docker deployment
 
-The QA caller `.github/workflows/foundry-agent-qa-test.yml` invokes
-`foundry-agent-container-reusable.yml`. Run it manually from GitHub Actions.
+The normal QA workflow `.github/workflows/foundry-agent-qa-test.yml` builds and
+pushes the agent image, then invokes the deployment-only
+`foundry-agent-container-reusable.yml` with the pushed image digest. Run it manually from GitHub Actions.
 It deploys from the main trunk using the QA Environment and OIDC managed identity.
 There is no separate approval job; build, push, deploy and verification run consecutively.
 
-The workflow builds `applications/foundry-hosted-alert-agent/Dockerfile` for
+The normal workflow builds `applications/foundry-hosted-alert-agent/Dockerfile` for
 `linux/amd64`. The image runs Python 3.13 as an unprivileged user and starts the
 Responses server on port 8088. Only `main.py` and `requirements.txt` are copied
 into the image. No credentials are provided as build arguments or image layers.
 
-The workflow pushes a unique commit/run/attempt tag to ACR and deploys the resulting
-immutable `registry/repository@sha256:...` reference. There is no local container
+The normal workflow pushes a unique commit/run/attempt tag to ACR and deploys the resulting
+immutable `registry/repository@sha256:...` reference passed to the reusable workflow.
+The reusable template does not build or push images and has no Docker socket mount. There is no local container
 readiness step. Foundry receives JSON containing `container_configuration`,
 with no source ZIP or `code_configuration`.
 
@@ -62,7 +64,8 @@ restore it on a later apply.
 
 The reusable workflow runs its steps inside a prebuilt CI job container. The Linux
 runner VM needs Docker Engine; Python 3.13, Azure CLI and Docker CLI come from
-`image_name` (required). Other inputs are `environment_name` (required),
+`image_name` (required). Deployment also requires `agent_image` (digest),
+`acr_login_server` and `environment_name`. `image_tag` is optional summary metadata. Other inputs are
 `runner_name` (default `ubuntu-24.04`) and `promote_endpoint` (default `false`).
 See [containerized CI](CONTAINERIZED-CI.md) for Docker Hub publishing and JFrog migration.
 
@@ -72,11 +75,15 @@ permissions:
   id-token: write
 jobs:
   deploy:
+    needs: build # Normal workflow job exposes the pushed image outputs.
     uses: ./.github/workflows/foundry-agent-container-reusable.yml
     with:
       environment_name: qa
       runner_name: ubuntu-24.04
       image_name: ${{ vars.CI_RUNNER_IMAGE }}
+      agent_image: ${{ needs.build.outputs.agent_image }}
+      acr_login_server: ${{ needs.build.outputs.acr_login_server }}
+      image_tag: ${{ needs.build.outputs.image_tag }}
       promote_endpoint: true
     secrets: inherit
 ```

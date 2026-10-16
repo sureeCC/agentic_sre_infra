@@ -4,12 +4,111 @@ on:
 permissions:
   contents: read
   id-token: write
+concurrency:
+  group: foundry-qa-build-and-deploy
+  cancel-in-progress: false
 jobs:
+  build:
+    name: Build and push agent image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: qa
+    timeout-minutes: 30
+    container:
+      image: ${{ vars.CI_RUNNER_IMAGE }}
+      credentials: ${{ fromJSON(secrets.CI_REGISTRY_USERNAME != '' && format('{{"username":{0},"password":{1}}}', toJSON(secrets.CI_REGISTRY_USERNAME), toJSON(secrets.CI_REGISTRY_PASSWORD)) || '{}') }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      agent_image: ${{ steps.push.outputs.agent_image }}
+      acr_login_server: ${{ steps.push.outputs.acr_login_server }}
+      image_tag: ${{ steps.push.outputs.image_tag }}
+    env:
+      AZURE_CONFIG_DIR: /tmp/foundry-build-azure-${{ github.run_id }}-${{ github.run_attempt }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      AGENT_IMAGE_REPOSITORY: ${{ vars.AGENT_IMAGE_REPOSITORY || 'sre-alert-postgres-hosted' }}
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test deployment helpers
+        run: |
+          set -euo pipefail
+          python scripts/ci/test-container-deployment.py
+          python scripts/ci/test-post-deployment.py
+      - name: Azure login using managed identity federation
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+        with:
+          client-id: ${{ secrets.CLIENT_ID || vars.CLIENT_ID }}
+          tenant-id: ${{ secrets.TENANT_ID || vars.TENANT_ID }}
+          subscription-id: ${{ secrets.SUBSCRIPTION || vars.SUBSCRIPTION }}
+      - name: Resolve registry and authenticate Docker
+        id: registry
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/foundry-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          registry=$(az acr show --name "$ACR_NAME" --query loginServer --output tsv)
+          [[ "$registry" =~ ^[a-z0-9]+\.azurecr\.io$ ]]
+          echo "ACR_LOGIN_SERVER=$registry" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=$registry/$AGENT_IMAGE_REPOSITORY:$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          az acr login --name "$ACR_NAME"
+
+      - name: Build Linux Docker image
+        id: build
+        run: |
+          set -euo pipefail
+          docker build --pull --platform linux/amd64 \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$IMAGE_TAG" applications/foundry-hosted-alert-agent
+          test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE_TAG")" = agent
+          docker run --rm --entrypoint python "$IMAGE_TAG" -c 'import main'
+
+      - name: Push image and record immutable reference
+        id: push
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE_TAG"
+          image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG")
+          [[ "$image" == "$ACR_LOGIN_SERVER/$AGENT_IMAGE_REPOSITORY@sha256:"* ]]
+          echo "AGENT_IMAGE=$image" >> "$GITHUB_ENV"
+          echo "agent_image=$image" >> "$GITHUB_OUTPUT"
+          echo "acr_login_server=$ACR_LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "Pushed image: $image"
+
+      - name: Clear registry login
+        if: always()
+        run: |
+          if [ -n "${ACR_LOGIN_SERVER:-}" ]; then docker logout "$ACR_LOGIN_SERVER"; fi
+      - name: Build and push summary
+        if: always()
+        env:
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          PUSH_RESULT: ${{ steps.push.outcome }}
+        run: |
+          {
+            echo '## Agent image build and push'
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Docker build | $BUILD_RESULT |"
+            echo "| ACR push | $PUSH_RESULT |"
+            echo ""
+            echo "Image: ${AGENT_IMAGE:-Not published}"
+          } >> "$GITHUB_STEP_SUMMARY"
   deploy:
+    needs: build
     uses: ./.github/workflows/foundry-agent-container-reusable.yml
     with:
       runner_name: ubuntu-24.04
       image_name: ${{ vars.CI_RUNNER_IMAGE }}
       environment_name: qa
+      agent_image: ${{ needs.build.outputs.agent_image }}
+      acr_login_server: ${{ needs.build.outputs.acr_login_server }}
+      image_tag: ${{ needs.build.outputs.image_tag }}
       promote_endpoint: true
     secrets: inherit
