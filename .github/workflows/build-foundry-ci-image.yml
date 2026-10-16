@@ -1,0 +1,138 @@
+name: Build Foundry CI tools image
+
+on:
+  workflow_dispatch:
+    inputs:
+      push_to_dockerhub:
+        description: Publish the tested tools image to Docker Hub
+        type: boolean
+        default: false
+      repository:
+        description: Docker Hub namespace/repository (or set CI_TOOLS_REPOSITORY variable)
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundry-ci-tools-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Bootstrap also runs inside Docker; no Python/CLI packages go on the VM.
+    # Only shell steps are used here, so this Alpine image needs no JS actions.
+    container:
+      image: docker:28-cli
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    defaults:
+      run:
+        shell: sh
+    env:
+      CI_TOOLS_REPOSITORY: ${{ inputs.repository || vars.CI_TOOLS_REPOSITORY || 'suresh3796/vm-foundry-image' }}
+      DOCKER_CONFIG: /tmp/ci-image-docker-${{ github.run_id }}-${{ github.run_attempt }}
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - name: Fetch exact source commit inside bootstrap container
+        env:
+          GH_CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git init "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          auth=$(printf 'x-access-token:%s' "$GH_CHECKOUT_TOKEN" | base64 | tr -d '\n')
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.$GITHUB_SERVER_URL/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 auth GH_CHECKOUT_TOKEN
+          git checkout --detach FETCH_HEAD
+
+      - name: Validate publishing configuration
+        if: inputs.push_to_dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -eu
+          test -n "$DOCKERHUB_USERNAME"
+          test -n "$DOCKERHUB_TOKEN"
+          printf '%s' "$CI_TOOLS_REPOSITORY" | grep -Eq '^[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9._-]*$'
+
+      - name: Build CI tools image
+        id: build
+        run: |
+          set -eu
+          docker build --pull --platform linux/amd64 \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "foundry-ci-tools:$GITHUB_SHA" ci/foundry-tools
+
+      - name: Check preinstalled tools and Docker socket access
+        id: check
+        run: |
+          set -eu
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            "foundry-ci-tools:$GITHUB_SHA" bash -euo pipefail -c '
+              python -c "import sys; assert sys.version_info[:2] == (3, 13)"
+              python -m pip check
+              az version --output none
+              docker version
+              docker buildx version
+              node --version
+              git --version
+              jq --version
+              curl --version
+            '
+
+      - name: Publish tested CI image to Docker Hub
+        id: push
+        if: inputs.push_to_dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -eu
+          tag="$CI_TOOLS_REPOSITORY:$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin docker.io
+          docker tag "foundry-ci-tools:$GITHUB_SHA" "$tag"
+          docker push "$tag"
+          image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$tag")
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Published CI tools image: $image"
+
+      - name: Clear Docker Hub login
+        if: always()
+        run: |
+          docker logout docker.io
+
+      - name: Image build summary
+        if: always()
+        env:
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          CHECK_RESULT: ${{ steps.check.outcome }}
+          PUSH_RESULT: ${{ steps.push.outcome }}
+          PUBLISHED_IMAGE: ${{ steps.push.outputs.image }}
+        run: |
+          {
+            echo '## Foundry CI tools image'
+            echo ''
+            echo '| Stage | Result |'
+            echo '|---|---|'
+            echo "| Build | $BUILD_RESULT |"
+            echo "| Tools and socket checks | $CHECK_RESULT |"
+            echo "| Docker Hub push | $PUSH_RESULT |"
+            echo ''
+            if [ -n "$PUBLISHED_IMAGE" ]; then
+              echo "Set repository variable CI_RUNNER_IMAGE to: $PUBLISHED_IMAGE"
+            else
+              echo 'No image was published.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
