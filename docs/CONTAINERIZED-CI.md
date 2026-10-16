@@ -39,10 +39,10 @@ baked into it.
 
 ## Docker access and the organization VM
 
-The CI image has the Docker **client**, not a running Docker daemon. Only the normal workflow build job mounts
+The CI image has the Docker **client**, not a running Docker daemon. The normal workflow build job explicitly mounts
 `/var/run/docker.sock` from the Linux VM. Build/push commands run in the job
 container and send requests to the VM's Docker Engine. Agent import checks start
-a sibling container through that same engine. The deployment-only job has no Docker socket mount. This is socket sharing, not Docker
+a sibling container through that same engine. The deployment-only job does not invoke Docker or require daemon access. This is socket sharing, not Docker
 in Docker, and needs no privileged DinD service.
 
 The VM needs Docker Engine and a registered GitHub Actions runner. The runner

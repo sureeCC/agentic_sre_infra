@@ -13,7 +13,7 @@ into the image. No credentials are provided as build arguments or image layers.
 
 The normal workflow pushes a unique commit/run/attempt tag to ACR and deploys the resulting
 immutable `registry/repository@sha256:...` reference passed to the reusable workflow.
-The reusable template does not build or push images and has no Docker socket mount. There is no local container
+The reusable template does not build or push images and does not invoke Docker. There is no local container
 readiness step. Foundry receives JSON containing `container_configuration`,
 with no source ZIP or `code_configuration`.
 
