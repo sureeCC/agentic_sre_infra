@@ -50,9 +50,7 @@ jobs:
     runs-on: ${{ inputs.runner_name }}
     container:
       image: ${{ inputs.image_name }}
-      credentials:
-        username: ${{ secrets.CI_REGISTRY_USERNAME }}
-        password: ${{ secrets.CI_REGISTRY_PASSWORD }}
+      credentials: ${{ fromJSON(secrets.CI_REGISTRY_USERNAME != '' && format('{{"username":{0},"password":{1}}}', toJSON(secrets.CI_REGISTRY_USERNAME), toJSON(secrets.CI_REGISTRY_PASSWORD)) || '{}') }}
       volumes:
         - /var/run/docker.sock:/var/run/docker.sock
     environment: ${{ inputs.environment_name }}
