@@ -9,6 +9,7 @@ jobs:
     uses: ./.github/workflows/foundry-agent-container-reusable.yml
     with:
       runner_name: ubuntu-24.04
+      image_name: ${{ vars.CI_RUNNER_IMAGE }}
       environment_name: qa
       promote_endpoint: true
     secrets: inherit

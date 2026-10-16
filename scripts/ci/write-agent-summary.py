@@ -22,9 +22,10 @@ def render(env):
 
     steps = json.loads(env.get("STAGE_RESULTS") or "{}")
     result = value("JOB_STATUS")
-    lines = [f"## Foundry Docker deployment â€” {result}", "",
+    lines = [f"## Foundry Docker deployment - {result}", "",
              f"Environment: **{value('DEPLOYMENT_ENVIRONMENT')}**", "",
              "| Deployment | Value |", "|---|---|",
+             f"| CI tools image | `{value('CI_TOOLS_IMAGE')}` |",
              f"| Agent | `{value('FOUNDRY_AGENT_NAME')}` |",
              f"| Version | `{value('DEPLOYED_AGENT_VERSION')}` |",
              f"| Image tag | `{value('IMAGE_TAG')}` |",

@@ -9,6 +9,10 @@ on:
         type: string
         required: false
         default: ubuntu-24.04
+      image_name:
+        description: Prebuilt CI tools image from Docker Hub or JFrog (prefer a digest reference)
+        type: string
+        required: true
       environment_name:
         description: GitHub environment providing vars and deployment protection
         type: string
@@ -18,6 +22,19 @@ on:
         type: boolean
         required: false
         default: false
+    secrets:
+      CLIENT_ID:
+        required: false
+      TENANT_ID:
+        required: false
+      SUBSCRIPTION:
+        required: false
+      CI_REGISTRY_USERNAME:
+        description: Optional pull username for a private CI tools registry
+        required: false
+      CI_REGISTRY_PASSWORD:
+        description: Optional pull token for a private CI tools registry
+        required: false
 
 permissions:
   contents: read
@@ -31,6 +48,13 @@ jobs:
     name: Build push and deploy Foundry container
     if: github.ref == 'refs/heads/main'
     runs-on: ${{ inputs.runner_name }}
+    container:
+      image: ${{ inputs.image_name }}
+      credentials:
+        username: ${{ secrets.CI_REGISTRY_USERNAME }}
+        password: ${{ secrets.CI_REGISTRY_PASSWORD }}
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
     environment: ${{ inputs.environment_name }}
     timeout-minutes: 45
     permissions:
@@ -40,6 +64,8 @@ jobs:
       run:
         shell: bash
     env:
+      CI_TOOLS_IMAGE: ${{ inputs.image_name }}
+      AZURE_CONFIG_DIR: /tmp/foundry-azure-${{ github.run_id }}-${{ github.run_attempt }}
       ACR_NAME: ${{ vars.ACR_NAME }}
       AGENT_IMAGE_REPOSITORY: ${{ vars.AGENT_IMAGE_REPOSITORY || 'sre-alert-postgres-hosted' }}
       FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
@@ -56,11 +82,6 @@ jobs:
           persist-credentials: false
           clean: true
 
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: '3.13'
-
       - name: Validate configuration and tooling
         id: validate
         env:
@@ -72,6 +93,8 @@ jobs:
           for name in CLIENT_ID TENANT_ID SUBSCRIPTION ACR_NAME AGENT_IMAGE_REPOSITORY FOUNDRY_PROJECT_ENDPOINT FOUNDRY_AGENT_NAME AZURE_AI_MODEL_DEPLOYMENT_NAME AGENT_CPU AGENT_MEMORY; do
             if [ -z "${!name:-}" ]; then echo "::error::Missing configuration: $name"; exit 1; fi
           done
+          test -f /.dockerenv
+          echo "Running deployment tools inside the CI job container"
           python --version
           python -c 'import sys; assert sys.version_info[:2] == (3, 13), "Python 3.13 required"'
           az version --output none
@@ -159,5 +182,5 @@ jobs:
             python scripts/ci/write-agent-summary.py
           else
             echo '## Foundry deployment summary' >> "$GITHUB_STEP_SUMMARY"
-            echo "Job: $JOB_STATUS. Detailed summary unavailable because checkout or Python setup failed." >> "$GITHUB_STEP_SUMMARY"
+            echo "Job: $JOB_STATUS. Detailed summary unavailable because checkout or CI image initialization failed." >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -60,9 +60,11 @@ Foundry network connectivity. QA's public-access test exceptions are Azure-side
 changes; the current Terragrunt inputs still disable public access and will
 restore it on a later apply.
 
-The reusable workflow runs directly on a Linux runner with a Docker daemon, Azure
-CLI and Python 3.13. Its only inputs are `environment_name` (required), `runner_name`
-(default `ubuntu-24.04`) and `promote_endpoint` (default `false`).
+The reusable workflow runs its steps inside a prebuilt CI job container. The Linux
+runner VM needs Docker Engine; Python 3.13, Azure CLI and Docker CLI come from
+`image_name` (required). Other inputs are `environment_name` (required),
+`runner_name` (default `ubuntu-24.04`) and `promote_endpoint` (default `false`).
+See [containerized CI](CONTAINERIZED-CI.md) for Docker Hub publishing and JFrog migration.
 
 ```yaml
 permissions:
@@ -74,6 +76,7 @@ jobs:
     with:
       environment_name: qa
       runner_name: ubuntu-24.04
+      image_name: ${{ vars.CI_RUNNER_IMAGE }}
       promote_endpoint: true
     secrets: inherit
 ```
@@ -82,7 +85,7 @@ The PR-only `ai-agent.yml` checks deployment scripts, builds the Docker image an
 checks agent imports. It does not authenticate to Azure, push or deploy images.
 Source-upload workflows, packaging helpers and source-build manifests have been
 removed. Existing callers of `foundry-agent-reusable.yml` must switch to the Docker
-reusable workflow. The unused job-container input `image_name` was also removed.
+reusable workflow. The job-container input `image_name` is required for the prebuilt CI tools image.
 Docker authentication uses a run-specific directory and is logged out after the run.
 
 Dependencies and the base-image tag are currently resolved during the build.
