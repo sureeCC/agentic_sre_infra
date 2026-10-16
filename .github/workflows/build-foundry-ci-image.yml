@@ -47,6 +47,7 @@ jobs:
           set -eu
           git init "$GITHUB_WORKSPACE"
           cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
           auth=$(printf 'x-access-token:%s' "$GH_CHECKOUT_TOKEN" | base64 | tr -d '\n')
           export GIT_CONFIG_COUNT=1
