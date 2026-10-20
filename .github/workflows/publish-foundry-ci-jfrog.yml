@@ -56,8 +56,12 @@ jobs:
           set -eu
           target="$DESTINATION_REPOSITORY:$IMAGE_TAG"
           source_id=$(docker image inspect --format '{{.Id}}' "$SOURCE_REPOSITORY@$SOURCE_DIGEST")
-          docker tag "$SOURCE_REPOSITORY@$SOURCE_DIGEST" "$target"
-          docker push "$target"
+          if docker manifest inspect "$target" > /dev/null 2>&1; then
+            echo 'Destination tag already exists; verifying without overwrite.'
+          else
+            docker tag "$SOURCE_REPOSITORY@$SOURCE_DIGEST" "$target"
+            docker push "$target"
+          fi
           docker pull --platform linux/amd64 "$target"
           image=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$target" | grep -F "$DESTINATION_REPOSITORY@sha256:")
           test -n "$image"
