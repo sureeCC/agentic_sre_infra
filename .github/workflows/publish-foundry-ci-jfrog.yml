@@ -50,23 +50,27 @@ jobs:
             jq --version
           '
 
-      - name: Push and verify identical registry digest
+      - name: Push and verify identical image contents
         id: push
         run: |
           set -eu
           target="$DESTINATION_REPOSITORY:$IMAGE_TAG"
+          source_id=$(docker image inspect --format '{{.Id}}' "$SOURCE_REPOSITORY@$SOURCE_DIGEST")
           docker tag "$SOURCE_REPOSITORY@$SOURCE_DIGEST" "$target"
           docker push "$target"
           docker pull --platform linux/amd64 "$target"
           image=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$target" | grep -F "$DESTINATION_REPOSITORY@sha256:")
-          test "$image" = "$DESTINATION_REPOSITORY@$SOURCE_DIGEST"
+          test -n "$image"
+          docker pull --platform linux/amd64 "$image"
+          destination_id=$(docker image inspect --format '{{.Id}}' "$image")
+          test "$destination_id" = "$source_id"
           echo "image=$image" >> "$GITHUB_OUTPUT"
           {
             echo '## Foundry CI tools image published to JFrog'
             echo ''
             echo "Image: $image"
             echo ''
-            echo 'The existing Docker Hub image was copied and the destination digest was verified.'
+            echo 'The published image was pulled by its destination digest and its configuration and layer content identity matches the source.'
             echo 'JFrog pull credentials are required before using this image as a job container.'
           } >> "$GITHUB_STEP_SUMMARY"
 
