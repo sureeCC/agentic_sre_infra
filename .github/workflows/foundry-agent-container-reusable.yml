@@ -30,12 +30,19 @@ on:
         type: string
         required: false
         default: ''
-      promote_endpoint:
-        description: Explicitly route 100% endpoint traffic to the new version before checking it
-        type: boolean
-        required: false
-        default: false
+      deployment_script_url:
+        description: Versioned HTTPS JFrog URL for the standalone deployment script
+        type: string
+        required: true
+      deployment_script_sha256:
+        description: Trusted SHA256 of the deployment script
+        type: string
+        required: true
     secrets:
+      JFROG_TOKEN:
+        required: true
+      JFROG_USERNAME:
+        required: true
       CLIENT_ID:
         required: false
       TENANT_ID:
@@ -59,13 +66,13 @@ concurrency:
 jobs:
   deploy:
     name: Deploy Foundry container
-    if: github.ref == 'refs/heads/main'
     runs-on: ${{ inputs.runner_name }}
     container:
       image: ${{ inputs.image_name }}
-      credentials: ${{ fromJSON(secrets.CI_REGISTRY_USERNAME != '' && format('{{"username":{0},"password":{1}}}', toJSON(secrets.CI_REGISTRY_USERNAME), toJSON(secrets.CI_REGISTRY_PASSWORD)) || '{}') }}
+      credentials:
+        username: ${{ secrets.JFROG_USERNAME }}
+        password: ${{ secrets.JFROG_TOKEN }}
     environment: ${{ inputs.environment_name }}
-    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
@@ -74,6 +81,7 @@ jobs:
         shell: bash
     env:
       CI_TOOLS_IMAGE: ${{ inputs.image_name }}
+      DEPLOYMENT_SCRIPT: /tmp/foundry-script-${{ github.run_id }}-${{ github.run_attempt }}/foundry-agent.py
       AZURE_CONFIG_DIR: /tmp/foundry-azure-${{ github.run_id }}-${{ github.run_attempt }}
       AGENT_IMAGE: ${{ inputs.agent_image }}
       ACR_LOGIN_SERVER: ${{ inputs.acr_login_server }}
@@ -84,13 +92,42 @@ jobs:
       AGENT_CPU: ${{ vars.AGENT_CPU }}
       AGENT_MEMORY: ${{ vars.AGENT_MEMORY }}
     steps:
-      # Checkout cleans the caller checkout; do not recursively delete the shared workspace.
-      - name: Checkout application repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-          clean: true
+      - name: Download and verify deployment script from JFrog
+        env:
+          SCRIPT_URL: ${{ inputs.deployment_script_url }}
+          SCRIPT_SHA256: ${{ inputs.deployment_script_sha256 }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, os, pathlib, re, urllib.request
+          from urllib.parse import urlparse
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+          url = os.environ['SCRIPT_URL']
+          parsed = urlparse(url)
+          digest = os.environ['SCRIPT_SHA256'].lower()
+          if (parsed.scheme != 'https' or parsed.hostname != 'trialgzg6hm.jfrog.io'
+                  or parsed.port not in (None, 443) or parsed.username or parsed.password
+                  or parsed.query or parsed.fragment
+                  or not parsed.path.startswith('/artifactory/sre-poc-generic-local/')):
+              raise SystemExit('Invalid JFrog script URL')
+          if not re.fullmatch('[a-f0-9]{64}', digest):
+              raise SystemExit('Invalid script SHA256')
+          request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['JFROG_TOKEN']})
+          try:
+              with urllib.request.build_opener(NoRedirect()).open(request, timeout=120) as response:
+                  data = response.read(1024 * 1024 + 1)
+          except Exception:
+              raise SystemExit('JFrog download failed; check artifact URL and token read access') from None
+          if len(data) > 1024 * 1024 or hashlib.sha256(data).hexdigest() != digest:
+              raise SystemExit('Deployment script checksum verification failed')
+          path = pathlib.Path(os.environ['DEPLOYMENT_SCRIPT'])
+          path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+          path.write_bytes(data)
+          print('Downloaded and verified pinned deployment script')
+          PY
 
       - name: Validate configuration and tooling
         id: validate
@@ -106,10 +143,8 @@ jobs:
           test -f /.dockerenv
           echo "Running deployment tools inside the CI job container"
           python --version
-          python -c 'import sys; assert sys.version_info[:2] == (3, 13), "Python 3.13 required"'
           az version --output none
-          test -f scripts/ci/deploy-container-agent.py
-          python -c 'import runpy; runpy.run_path("scripts/ci/deploy-container-agent.py")["definition"]()'
+          python -c 'import os, runpy; deploy = runpy.run_path(os.environ["DEPLOYMENT_SCRIPT"]); deploy["target"](); deploy["definition"]()'
 
       - name: Azure login using managed identity federation
         id: login
@@ -121,32 +156,33 @@ jobs:
 
       - name: Deploy image to Foundry and wait for active version
         id: deploy
-        run: python scripts/ci/deploy-container-agent.py
-
-      - name: Promote endpoint to deployed version
-        id: route
-        if: inputs.promote_endpoint
-        env:
-          DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
-        run: python scripts/ci/check-deployed-agent.py --promote
+        run: python "$DEPLOYMENT_SCRIPT" deploy
 
       - name: Verify deployed agent through Foundry endpoint
         id: post_check
-        timeout-minutes: 8
+        timeout-minutes: 15
         env:
           DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
-        run: python scripts/ci/check-deployed-agent.py
+        run: python "$DEPLOYMENT_SCRIPT" verify
+
+      - name: Clear deployment authentication cache
+        id: cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          expected="/tmp/foundry-azure-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$AZURE_CONFIG_DIR" = "$expected"
+          rm -rf -- "$AZURE_CONFIG_DIR"
 
       - name: Write pipeline summary
         if: always()
         env:
-          STAGE_RESULTS: ${{ toJSON(steps) }}
           JOB_STATUS: ${{ job.status }}
           DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment_name }}
           DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
         run: |
-          if command -v python >/dev/null && [ -f scripts/ci/write-agent-summary.py ]; then
-            python scripts/ci/write-agent-summary.py
+          if command -v python >/dev/null && [ -f "$DEPLOYMENT_SCRIPT" ]; then
+            python "$DEPLOYMENT_SCRIPT" summary
           else
             echo '## Foundry deployment summary' >> "$GITHUB_STEP_SUMMARY"
             echo "Job: $JOB_STATUS. Detailed summary unavailable because checkout or CI image initialization failed." >> "$GITHUB_STEP_SUMMARY"
