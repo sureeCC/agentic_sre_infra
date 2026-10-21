@@ -10,9 +10,22 @@ on:
         required: false
         default: ubuntu-24.04
       image_name:
-        description: Prebuilt CI tools image from Docker Hub or JFrog (prefer a digest reference)
+        description: Fully qualified JFrog CI tools image pinned by digest
         type: string
         required: true
+      artifactory_user:
+        description: JFrog Artifactory username
+        type: string
+        required: true
+      artifactory_url:
+        description: HTTPS Artifactory server base URL used for script downloads
+        type: string
+        required: true
+      container_options:
+        description: Additional job container options supplied by the caller
+        type: string
+        required: false
+        default: ''
       environment_name:
         description: GitHub environment providing vars and deployment protection
         type: string
@@ -39,21 +52,14 @@ on:
         type: string
         required: true
     secrets:
-      JFROG_TOKEN:
-        required: true
-      JFROG_USERNAME:
+      artifactory_token:
+        description: JFrog token used to pull the CI image and download the deployment script
         required: true
       CLIENT_ID:
         required: false
       TENANT_ID:
         required: false
       SUBSCRIPTION:
-        required: false
-      CI_REGISTRY_USERNAME:
-        description: Optional pull username for a private CI tools registry
-        required: false
-      CI_REGISTRY_PASSWORD:
-        description: Optional pull token for a private CI tools registry
         required: false
 
 permissions:
@@ -69,9 +75,10 @@ jobs:
     runs-on: ${{ inputs.runner_name }}
     container:
       image: ${{ inputs.image_name }}
+      options: ${{ inputs.container_options }}
       credentials:
-        username: ${{ secrets.JFROG_USERNAME }}
-        password: ${{ secrets.JFROG_TOKEN }}
+        username: ${{ inputs.artifactory_user }}
+        password: ${{ secrets.artifactory_token }}
     environment: ${{ inputs.environment_name }}
     permissions:
       contents: read
@@ -96,26 +103,38 @@ jobs:
         env:
           SCRIPT_URL: ${{ inputs.deployment_script_url }}
           SCRIPT_SHA256: ${{ inputs.deployment_script_sha256 }}
-          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+          ARTIFACTORY_USER: ${{ inputs.artifactory_user }}
+          ARTIFACTORY_TOKEN: ${{ secrets.artifactory_token }}
+          ARTIFACTORY_URL: ${{ inputs.artifactory_url }}
         run: |
           set -euo pipefail
           python - <<'PY'
-          import hashlib, os, pathlib, re, urllib.request
+          import base64, hashlib, os, pathlib, re, urllib.request
           from urllib.parse import urlparse
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, *args, **kwargs):
                   return None
           url = os.environ['SCRIPT_URL']
           parsed = urlparse(url)
+          server = urlparse(os.environ['ARTIFACTORY_URL'])
           digest = os.environ['SCRIPT_SHA256'].lower()
-          if (parsed.scheme != 'https' or parsed.hostname != 'trialgzg6hm.jfrog.io'
+          if (server.scheme != 'https' or not server.hostname
+                  or server.port not in (None, 443) or server.username or server.password
+                  or server.path not in ('', '/') or server.query or server.fragment):
+              raise SystemExit('Invalid Artifactory server URL')
+          if (parsed.scheme != 'https' or parsed.hostname != server.hostname
                   or parsed.port not in (None, 443) or parsed.username or parsed.password
                   or parsed.query or parsed.fragment
-                  or not parsed.path.startswith('/artifactory/sre-poc-generic-local/')):
+                  or not parsed.path.startswith('/artifactory/')
+                  or not parsed.path.endswith('/foundry-agent.py')):
               raise SystemExit('Invalid JFrog script URL')
           if not re.fullmatch('[a-f0-9]{64}', digest):
               raise SystemExit('Invalid script SHA256')
-          request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['JFROG_TOKEN']})
+          user, token = os.environ['ARTIFACTORY_USER'], os.environ['ARTIFACTORY_TOKEN']
+          if not user or not token:
+              raise SystemExit('Missing Artifactory username or token')
+          credentials = base64.b64encode(f'{user}:{token}'.encode()).decode()
+          request = urllib.request.Request(url, headers={'Authorization': 'Basic ' + credentials})
           try:
               with urllib.request.build_opener(NoRedirect()).open(request, timeout=120) as response:
                   data = response.read(1024 * 1024 + 1)
@@ -130,7 +149,6 @@ jobs:
           PY
 
       - name: Validate configuration and tooling
-        id: validate
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID || vars.CLIENT_ID }}
           TENANT_ID: ${{ secrets.TENANT_ID || vars.TENANT_ID }}
@@ -147,7 +165,6 @@ jobs:
           python -c 'import os, runpy; deploy = runpy.run_path(os.environ["DEPLOYMENT_SCRIPT"]); deploy["target"](); deploy["definition"]()'
 
       - name: Azure login using managed identity federation
-        id: login
         uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
           client-id: ${{ secrets.CLIENT_ID || vars.CLIENT_ID }}
@@ -159,14 +176,12 @@ jobs:
         run: python "$DEPLOYMENT_SCRIPT" deploy
 
       - name: Verify deployed agent through Foundry endpoint
-        id: post_check
         timeout-minutes: 15
         env:
           DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
         run: python "$DEPLOYMENT_SCRIPT" verify
 
       - name: Clear deployment authentication cache
-        id: cleanup
         if: always()
         run: |
           set -euo pipefail
