@@ -85,21 +85,6 @@ jobs:
         if: always()
         run: |
           if [ -n "${ACR_LOGIN_SERVER:-}" ]; then docker logout "$ACR_LOGIN_SERVER"; fi
-      - name: Build and push summary
-        if: always()
-        env:
-          BUILD_RESULT: ${{ steps.build.outcome }}
-          PUSH_RESULT: ${{ steps.push.outcome }}
-        run: |
-          {
-            echo '## Agent image build and push'
-            echo "| Stage | Result |"
-            echo "|---|---|"
-            echo "| Docker build | $BUILD_RESULT |"
-            echo "| ACR push | $PUSH_RESULT |"
-            echo ""
-            echo "Image: ${AGENT_IMAGE:-Not published}"
-          } >> "$GITHUB_STEP_SUMMARY"
   deploy:
     if: github.ref == 'refs/heads/main'
     needs: build
