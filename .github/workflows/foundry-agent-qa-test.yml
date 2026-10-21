@@ -1,11 +1,6 @@
 name: QA Foundry Docker deployment test
 on:
   workflow_dispatch:
-    inputs:
-      promote_endpoint:
-        description: Route endpoint traffic to the deployed version
-        type: boolean
-        default: true
 permissions:
   contents: read
   id-token: write
@@ -20,8 +15,10 @@ jobs:
     environment: qa
     timeout-minutes: 30
     container:
-      image: ${{ vars.CI_RUNNER_IMAGE }}
-      credentials: ${{ fromJSON(secrets.CI_REGISTRY_USERNAME != '' && format('{{"username":{0},"password":{1}}}', toJSON(secrets.CI_REGISTRY_USERNAME), toJSON(secrets.CI_REGISTRY_PASSWORD)) || '{}') }}
+      image: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7
+      credentials:
+        username: ${{ secrets.JFROG_USERNAME }}
+        password: ${{ secrets.JFROG_TOKEN }}
       volumes:
         - /var/run/docker.sock:/var/run/docker.sock
     defaults:
@@ -37,14 +34,13 @@ jobs:
       AGENT_IMAGE_REPOSITORY: ${{ vars.AGENT_IMAGE_REPOSITORY || 'sre-alert-postgres-hosted' }}
     steps:
       - name: Checkout application
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Test deployment helpers
         run: |
           set -euo pipefail
-          python scripts/ci/test-container-deployment.py
-          python scripts/ci/test-post-deployment.py
+          python scripts/ci/test-foundry-agent.py
       - name: Azure login using managed identity federation
         uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
@@ -52,7 +48,6 @@ jobs:
           tenant-id: ${{ secrets.TENANT_ID || vars.TENANT_ID }}
           subscription-id: ${{ secrets.SUBSCRIPTION || vars.SUBSCRIPTION }}
       - name: Resolve registry and authenticate Docker
-        id: registry
         run: |
           set -euo pipefail
           export DOCKER_CONFIG="$RUNNER_TEMP/foundry-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -106,14 +101,16 @@ jobs:
             echo "Image: ${AGENT_IMAGE:-Not published}"
           } >> "$GITHUB_STEP_SUMMARY"
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: build
     uses: ./.github/workflows/foundry-agent-container-reusable.yml
     with:
       runner_name: ubuntu-24.04
-      image_name: ${{ vars.CI_RUNNER_IMAGE }}
+      image_name: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7
       environment_name: qa
       agent_image: ${{ needs.build.outputs.agent_image }}
       acr_login_server: ${{ needs.build.outputs.acr_login_server }}
       image_tag: ${{ needs.build.outputs.image_tag }}
-      promote_endpoint: ${{ inputs.promote_endpoint }}
+      deployment_script_url: https://trialgzg6hm.jfrog.io/artifactory/sre-poc-generic-local/foundry-agent/b6d33efa6316e4ba5acc0af7e95371e5a3f51325ca1323781b52b2b8c9bfa6e8/foundry-agent.py
+      deployment_script_sha256: b6d33efa6316e4ba5acc0af7e95371e5a3f51325ca1323781b52b2b8c9bfa6e8
     secrets: inherit

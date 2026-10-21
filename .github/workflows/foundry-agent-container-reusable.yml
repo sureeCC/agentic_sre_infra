@@ -185,5 +185,13 @@ jobs:
             python "$DEPLOYMENT_SCRIPT" summary
           else
             echo '## Foundry deployment summary' >> "$GITHUB_STEP_SUMMARY"
-            echo "Job: $JOB_STATUS. Detailed summary unavailable because checkout or CI image initialization failed." >> "$GITHUB_STEP_SUMMARY"
+            echo "Job: $JOB_STATUS. Detailed summary unavailable because the deployment script could not be downloaded and verified." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Clear downloaded deployment script
+        if: always()
+        run: |
+          set -euo pipefail
+          expected="/tmp/foundry-script-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/foundry-agent.py"
+          test "$DEPLOYMENT_SCRIPT" = "$expected"
+          rm -rf -- "$(dirname "$DEPLOYMENT_SCRIPT")"

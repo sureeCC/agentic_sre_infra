@@ -1,0 +1,57 @@
+name: Test JFrog Foundry script download
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+jobs:
+  test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    container:
+      image: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7
+      credentials:
+        username: ${{ secrets.JFROG_USERNAME }}
+        password: ${{ secrets.JFROG_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEPLOYMENT_SCRIPT: /tmp/foundry-script-${{ github.run_id }}-${{ github.run_attempt
+        }}/foundry-agent.py
+    steps:
+    - name: Download and verify deployment script from JFrog
+      env:
+        SCRIPT_URL: https://trialgzg6hm.jfrog.io/artifactory/sre-poc-generic-local/foundry-agent/b6d33efa6316e4ba5acc0af7e95371e5a3f51325ca1323781b52b2b8c9bfa6e8/foundry-agent.py
+        SCRIPT_SHA256: b6d33efa6316e4ba5acc0af7e95371e5a3f51325ca1323781b52b2b8c9bfa6e8
+        JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+      run: "set -euo pipefail\npython - <<'PY'\nimport hashlib, os, pathlib, re, urllib.request\n\
+        from urllib.parse import urlparse\nclass NoRedirect(urllib.request.HTTPRedirectHandler):\n\
+        \    def redirect_request(self, *args, **kwargs):\n        return None\nurl\
+        \ = os.environ['SCRIPT_URL']\nparsed = urlparse(url)\ndigest = os.environ['SCRIPT_SHA256'].lower()\n\
+        if (parsed.scheme != 'https' or parsed.hostname != 'trialgzg6hm.jfrog.io'\n\
+        \        or parsed.port not in (None, 443) or parsed.username or parsed.password\n\
+        \        or parsed.query or parsed.fragment\n        or not parsed.path.startswith('/artifactory/sre-poc-generic-local/')):\n\
+        \    raise SystemExit('Invalid JFrog script URL')\nif not re.fullmatch('[a-f0-9]{64}',\
+        \ digest):\n    raise SystemExit('Invalid script SHA256')\nrequest = urllib.request.Request(url,\
+        \ headers={'Authorization': 'Bearer ' + os.environ['JFROG_TOKEN']})\ntry:\n\
+        \    with urllib.request.build_opener(NoRedirect()).open(request, timeout=120)\
+        \ as response:\n        data = response.read(1024 * 1024 + 1)\nexcept Exception:\n\
+        \    raise SystemExit('JFrog download failed; check artifact URL and token\
+        \ read access') from None\nif len(data) > 1024 * 1024 or hashlib.sha256(data).hexdigest()\
+        \ != digest:\n    raise SystemExit('Deployment script checksum verification\
+        \ failed')\npath = pathlib.Path(os.environ['DEPLOYMENT_SCRIPT'])\npath.parent.mkdir(mode=0o700,\
+        \ parents=True, exist_ok=True)\npath.write_bytes(data)\nprint('Downloaded\
+        \ and verified pinned deployment script')\nPY\n"
+    - name: Check downloaded CLI without Azure deployment
+      run: 'set -euo pipefail
+
+        python -m py_compile "$DEPLOYMENT_SCRIPT"
+
+        python "$DEPLOYMENT_SCRIPT" --help
+
+        python "$DEPLOYMENT_SCRIPT" summary
+
+        echo "JFrog CI image pull, authenticated script download, SHA256 verification
+        and CLI execution passed." >> "$GITHUB_STEP_SUMMARY"
+
+        '
