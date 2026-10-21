@@ -49,7 +49,7 @@ jobs:
 
         python "$DEPLOYMENT_SCRIPT" --help
 
-        python "$DEPLOYMENT_SCRIPT" summary
+        env -u GITHUB_STEP_SUMMARY python "$DEPLOYMENT_SCRIPT" summary > /dev/null
 
         echo "JFrog CI image pull, authenticated script download, SHA256 verification
         and CLI execution passed." >> "$GITHUB_STEP_SUMMARY"
