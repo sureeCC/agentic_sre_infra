@@ -76,21 +76,17 @@ jobs:
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --tag "foundry-ci-tools:$GITHUB_SHA" ci/foundry-tools
 
-      - name: Check preinstalled tools and Docker socket access
+      - name: Check deployment runtime tools
         id: check
         run: |
           set -eu
-          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
-            "foundry-ci-tools:$GITHUB_SHA" bash -euo pipefail -c '
-              python -c "import sys; assert sys.version_info[:2] == (3, 13)"
-              python -m pip check
+          docker run --rm "foundry-ci-tools:$GITHUB_SHA" bash -euo pipefail -c '
+              python --version
+              python -c "import azure.cli, hashlib, json, ssl, urllib.request"
+              python -c "import importlib.util, shutil; assert importlib.util.find_spec(\"pip\") is None; assert importlib.util.find_spec(\"ensurepip\") is None; assert shutil.which(\"docker\") is None"
               az version --output none
-              docker version
-              docker buildx version
               node --version
               git --version
-              jq --version
-              curl --version
             '
 
       - name: Publish tested CI image to Docker Hub
@@ -128,11 +124,11 @@ jobs:
             echo '| Stage | Result |'
             echo '|---|---|'
             echo "| Build | $BUILD_RESULT |"
-            echo "| Tools and socket checks | $CHECK_RESULT |"
+            echo "| Deployment runtime checks | $CHECK_RESULT |"
             echo "| Docker Hub push | $PUSH_RESULT |"
             echo ''
             if [ -n "$PUBLISHED_IMAGE" ]; then
-              echo "Set repository variable CI_RUNNER_IMAGE to: $PUBLISHED_IMAGE"
+              echo "Set repository variable FOUNDRY_DEPLOY_IMAGE to: $PUBLISHED_IMAGE"
             else
               echo 'No image was published.'
             fi

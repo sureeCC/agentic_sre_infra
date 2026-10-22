@@ -1,4 +1,4 @@
-name: Publish existing Foundry CI image to JFrog
+name: Build and publish Foundry deployment runtime to JFrog
 on:
   workflow_dispatch:
 permissions:
@@ -10,78 +10,77 @@ jobs:
   publish:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    environment: qa
+    # Existing build-capable runtime bootstraps the deployment-only image.
     container:
-      image: docker:28-cli
+      image: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7
+      credentials:
+        username: ${{ secrets.JFROG_USERNAME }}
+        password: ${{ secrets.JFROG_TOKEN }}
       volumes:
         - /var/run/docker.sock:/var/run/docker.sock
     defaults:
       run:
-        shell: sh
+        shell: bash
     env:
-      SOURCE_REPOSITORY: docker.io/suresh3796/vm-foundry-image
-      SOURCE_DIGEST: sha256:54ef7d949ad4dd58d99262060e16932c40c133416d04da14593ba7649c9aacbb
-      IMAGE_TAG: fcee67c4a42dee5ed55f61233824a1c54725aa05-38870653394-1
       REGISTRY: trialgzg6hm.jfrog.io
-      DESTINATION_REPOSITORY: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image
+      DESTINATION_REPOSITORY: trialgzg6hm.jfrog.io/sre-poc-docker-local/foundry-deploy
       DOCKER_CONFIG: /tmp/jfrog-docker-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
+      - name: Checkout runtime source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build deployment-only runtime
+        run: |
+          set -euo pipefail
+          docker build --pull --platform linux/amd64 \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "foundry-deploy:$GITHUB_SHA" ci/foundry-tools
+      - name: Validate runtime and deployment script
+        run: |
+          set -euo pipefail
+          docker run --rm "foundry-deploy:$GITHUB_SHA" bash -euc '
+            python --version
+            az version --output none
+            az account get-access-token --help >/dev/null
+            node --version
+            git --version
+            python -c "import importlib.util, shutil; assert importlib.util.find_spec(\"pip\") is None; assert importlib.util.find_spec(\"ensurepip\") is None; assert shutil.which(\"docker\") is None"
+          '
+          check_container="foundry-runtime-check-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          trap 'docker rm -f "$check_container" >/dev/null 2>&1 || true' EXIT
+          docker create --name "$check_container" "foundry-deploy:$GITHUB_SHA" python /tests/test-foundry-agent.py
+          docker cp scripts/ci/. "$check_container:/tests"
+          docker start --attach "$check_container"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$check_container")" = 0
       - name: Authenticate to JFrog
         env:
           JFROG_USERNAME: ${{ secrets.JFROG_USERNAME }}
           JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
         run: |
-          set -eu
+          set -euo pipefail
           test -n "$JFROG_USERNAME"
           test -n "$JFROG_TOKEN"
           printf '%s' "$JFROG_TOKEN" | docker login "$REGISTRY" --username "$JFROG_USERNAME" --password-stdin
-
-      - name: Pull existing image by immutable digest
-        run: |
-          set -eu
-          docker pull --platform linux/amd64 "$SOURCE_REPOSITORY@$SOURCE_DIGEST"
-          docker run --rm "$SOURCE_REPOSITORY@$SOURCE_DIGEST" bash -euo pipefail -c '
-            python --version
-            python -m pip check
-            az version --output none
-            docker --version
-            node --version
-            git --version
-            jq --version
-          '
-
-      - name: Push and verify identical image contents
+      - name: Publish and verify runtime image
         id: push
         run: |
-          set -eu
-          target="$DESTINATION_REPOSITORY:$IMAGE_TAG"
-          source_id=$(docker image inspect --format '{{.Id}}' "$SOURCE_REPOSITORY@$SOURCE_DIGEST")
-          if docker manifest inspect "$target" > /dev/null 2>&1; then
-            echo 'Destination tag already exists; verifying without overwrite.'
-          else
-            docker tag "$SOURCE_REPOSITORY@$SOURCE_DIGEST" "$target"
-            docker push "$target"
-          fi
-          docker pull --platform linux/amd64 "$target"
+          set -euo pipefail
+          target="$DESTINATION_REPOSITORY:$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          source_id=$(docker image inspect --format '{{.Id}}' "foundry-deploy:$GITHUB_SHA")
+          docker tag "foundry-deploy:$GITHUB_SHA" "$target"
+          docker push "$target"
           image=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$target" | grep -F "$DESTINATION_REPOSITORY@sha256:")
           test -n "$image"
           docker pull --platform linux/amd64 "$image"
-          destination_id=$(docker image inspect --format '{{.Id}}' "$image")
-          test "$destination_id" = "$source_id"
+          test "$(docker image inspect --format '{{.Id}}' "$image")" = "$source_id"
           echo "image=$image" >> "$GITHUB_OUTPUT"
-          {
-            echo '## Foundry CI tools image published to JFrog'
-            echo ''
-            echo "Image: $image"
-            echo ''
-            echo 'The published image was pulled by its destination digest and its configuration and layer content identity matches the source.'
-            echo 'JFrog pull credentials are required before using this image as a job container.'
-          } >> "$GITHUB_STEP_SUMMARY"
-
+          printf '## Deployment runtime published\n\nImage: `%s`\n\nSet `FOUNDRY_DEPLOY_IMAGE` to this digest reference.\n' "$image" >> "$GITHUB_STEP_SUMMARY"
       - name: Clear registry credentials
         if: always()
         run: |
-          set -eu
+          set -euo pipefail
           docker logout "$REGISTRY" || true
           test "$DOCKER_CONFIG" = "/tmp/jfrog-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           rm -rf -- "$DOCKER_CONFIG"

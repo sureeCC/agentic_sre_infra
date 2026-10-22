@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: qa
     container:
-      image: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7
+      image: ${{ vars.FOUNDRY_DEPLOY_IMAGE || 'trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7' }}
       credentials:
         username: ${{ secrets.JFROG_USERNAME }}
         password: ${{ secrets.JFROG_TOKEN }}
@@ -66,6 +66,8 @@ jobs:
     environment: qa
     timeout-minutes: 30
     container:
+      # Separate build runtime: Docker/Buildx are intentionally absent from the
+      # deployment-only image selected by FOUNDRY_DEPLOY_IMAGE.
       image: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7
       credentials:
         username: ${{ secrets.JFROG_USERNAME }}
@@ -145,7 +147,7 @@ jobs:
       artifactory_user: ${{ vars.ARTIFACTORY_USER }}
       artifactory_url: https://trialgzg6hm.jfrog.io
       container_options: ${{ vars.CONTAINER_OPTIONS }}
-      image_name: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7
+      image_name: ${{ vars.FOUNDRY_DEPLOY_IMAGE || 'trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7' }}
       environment_name: qa
       agent_image: ${{ needs.build.outputs.agent_image }}
       acr_login_server: ${{ needs.build.outputs.acr_login_server }}
