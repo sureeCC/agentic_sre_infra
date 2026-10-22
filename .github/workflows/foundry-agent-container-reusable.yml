@@ -51,6 +51,11 @@ on:
         description: Trusted SHA256 of the deployment script
         type: string
         required: true
+      health_check_url:
+        description: Optional reachable GET health URL within the Foundry project; must return HTTP 200
+        type: string
+        required: false
+        default: ''
     secrets:
       artifactory_token:
         description: JFrog token used to pull the CI image and download the deployment script
@@ -176,9 +181,9 @@ jobs:
         run: python "$DEPLOYMENT_SCRIPT" deploy
 
       - name: Verify deployed agent through Foundry endpoint
-        timeout-minutes: 15
         env:
           DEPLOYED_AGENT_VERSION: ${{ steps.deploy.outputs.agent_version }}
+          HEALTH_CHECK_URL: ${{ inputs.health_check_url }}
         run: python "$DEPLOYMENT_SCRIPT" verify
 
       - name: Clear deployment authentication cache

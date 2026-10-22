@@ -8,6 +8,57 @@ concurrency:
   group: foundry-qa-build-and-deploy
   cancel-in-progress: false
 jobs:
+  publish-script:
+    name: Publish verified deployment script to JFrog
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: qa
+    container:
+      image: trialgzg6hm.jfrog.io/sre-poc-docker-local/vm-foundry-image@sha256:bb7ea32a7343dda37dac7cc3e200ae044edb0e65b4931d51ccf060ce40c951b7
+      credentials:
+        username: ${{ secrets.JFROG_USERNAME }}
+        password: ${{ secrets.JFROG_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout deployment script
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run offline regression tests
+        run: python scripts/ci/test-foundry-agent.py
+      - name: Publish checksum-addressed script release
+        env:
+          ARTIFACTORY_USER: ${{ secrets.JFROG_USERNAME }}
+          ARTIFACTORY_TOKEN: ${{ secrets.JFROG_TOKEN }}
+          EXPECTED_SHA256: 2ff74201659f9d3b5fb743f914eec13ccac64b10d52e1fe17dd56d88a0bfa769
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, urllib.request
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+          data = pathlib.Path('scripts/ci/foundry-agent.py').read_bytes()
+          digest = hashlib.sha256(data).hexdigest()
+          if digest != os.environ['EXPECTED_SHA256']:
+              raise SystemExit('Script differs from caller checksum; update release pins')
+          url = f'https://trialgzg6hm.jfrog.io/artifactory/sre-poc-generic-local/foundry-agent/{digest}/foundry-agent.py'
+          user, token = os.environ['ARTIFACTORY_USER'], os.environ['ARTIFACTORY_TOKEN']
+          if not user or not token:
+              raise SystemExit('Missing JFrog publishing credentials')
+          auth = base64.b64encode(f'{user}:{token}'.encode()).decode()
+          request = urllib.request.Request(url, data=data, method='PUT', headers={
+              'Authorization': 'Basic ' + auth, 'Content-Type': 'application/octet-stream',
+              'X-Checksum-Sha256': digest})
+          try:
+              with urllib.request.build_opener(NoRedirect()).open(request, timeout=120) as response:
+                  if response.status not in (200, 201):
+                      raise RuntimeError('Unexpected upload status')
+          except Exception:
+              raise SystemExit('JFrog script publication failed; check token write access') from None
+          print(f'Published deployment script SHA256: {digest}')
+          PY
   build:
     name: Build and push agent image
     if: github.ref == 'refs/heads/main'
@@ -87,7 +138,7 @@ jobs:
           if [ -n "${ACR_LOGIN_SERVER:-}" ]; then docker logout "$ACR_LOGIN_SERVER"; fi
   deploy:
     if: github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, publish-script]
     uses: ./.github/workflows/foundry-agent-container-reusable.yml
     with:
       runner_name: ubuntu-24.04
@@ -99,8 +150,8 @@ jobs:
       agent_image: ${{ needs.build.outputs.agent_image }}
       acr_login_server: ${{ needs.build.outputs.acr_login_server }}
       image_tag: ${{ needs.build.outputs.image_tag }}
-      deployment_script_url: https://trialgzg6hm.jfrog.io/artifactory/sre-poc-generic-local/foundry-agent/b6d33efa6316e4ba5acc0af7e95371e5a3f51325ca1323781b52b2b8c9bfa6e8/foundry-agent.py
-      deployment_script_sha256: b6d33efa6316e4ba5acc0af7e95371e5a3f51325ca1323781b52b2b8c9bfa6e8
+      deployment_script_url: https://trialgzg6hm.jfrog.io/artifactory/sre-poc-generic-local/foundry-agent/2ff74201659f9d3b5fb743f914eec13ccac64b10d52e1fe17dd56d88a0bfa769/foundry-agent.py
+      deployment_script_sha256: 2ff74201659f9d3b5fb743f914eec13ccac64b10d52e1fe17dd56d88a0bfa769
     secrets:
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       TENANT_ID: ${{ secrets.TENANT_ID }}
