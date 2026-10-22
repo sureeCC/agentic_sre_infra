@@ -12,10 +12,10 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
-import uuid
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from http.client import IncompleteRead
@@ -65,10 +65,10 @@ def remaining_seconds(deadline):
     return remaining
 
 
-def request(url, method="GET", body=None, *, deadline=None):
+def request(url, method="GET", body=None, *, deadline=None, health_check=False):
     """Make one authenticated request; never log tokens or response bodies."""
     token = subprocess.check_output(
-        ["az", "account", "get-access-token", "--resource", "https://ai.azure.com",
+        [shutil.which("az") or "az", "account", "get-access-token", "--resource", "https://ai.azure.com",
          "--query", "accessToken", "-o", "tsv"], text=True,
         stderr=subprocess.PIPE,
         timeout=min(TOKEN_TIMEOUT_SECONDS, remaining_seconds(deadline)) if deadline is not None else TOKEN_TIMEOUT_SECONDS,
@@ -82,6 +82,10 @@ def request(url, method="GET", body=None, *, deadline=None):
         with urlopen(Request(url, data=None if body is None else json.dumps(body).encode(),
                              headers=headers, method=method),
                      timeout=min(REQUEST_TIMEOUT_SECONDS, remaining_seconds(deadline)) if deadline is not None else REQUEST_TIMEOUT_SECONDS) as response:
+            if health_check:
+                if response.status != 200:
+                    raise RuntimeError("Health endpoint did not return HTTP 200")
+                return {}
             data = response.read()
             result = json.loads(data) if data else {}
             if not isinstance(result, dict):
@@ -254,8 +258,21 @@ def deployed_version():
 
 
 def verify_agent():
-    """Verify deployment readiness through the agent's stateless probe protocol."""
+    """Check deployment metadata and an optional caller-supplied health endpoint.
+
+    Foundry itself probes the container's /readiness endpoint. Do not invent a
+    public readiness route or invoke arbitrary agent logic as a health check.
+    """
     endpoint, name, version = deployed_version()
+    health_url = os.environ.get("HEALTH_CHECK_URL", "").strip()
+    if health_url:
+        parsed = urlparse(health_url)
+        project = urlparse(endpoint)
+        if (parsed.scheme != "https" or parsed.hostname != project.hostname
+                or parsed.port not in (None, 443) or parsed.username or parsed.password
+                or parsed.query or parsed.fragment
+                or not parsed.path.startswith(project.path + "/")):
+            raise ValueError("Health URL must be HTTPS within the configured Foundry project")
     agent = read_request(f"{endpoint}/agents/{name}?api-version=v1")
     rules = object_field(object_field(agent, "agent_endpoint"), "version_selector").get("version_selection_rules", [])
     if not isinstance(rules, list) or any(not isinstance(rule, dict) for rule in rules):
@@ -267,15 +284,13 @@ def verify_agent():
                       and rules[0].get("traffic_percentage") == 100))
     if not follows_latest or latest != version:
         raise RuntimeError("Agent endpoint is not following the deployed latest version; probe was not sent")
-    nonce = uuid.uuid4().hex
-    expected = f"DEPLOYMENT_OK:{nonce}:{version}"
-    # Retries are safe here: this reserved probe performs no model or tool calls.
+    if not health_url:
+        LOGGER.info("Verification passed: active version %s, expected image and latest routing; container readiness is checked by Foundry", version)
+        return
+    # Only GET is used: no model/tool invocation or application-specific payload.
     for attempt in range(3):
         try:
-            result = request(
-                f"{endpoint}/agents/{name}/endpoint/protocols/openai/responses?api-version=v1",
-                "POST", {"input": f"__deployment_healthcheck__:{nonce}", "stream": False, "store": False},
-            )
+            request(health_url, health_check=True)
             break
         except HTTPError as error:
             if error.code not in (408, 424, 429, 500, 502, 503, 504) or attempt == 2:
@@ -285,25 +300,7 @@ def verify_agent():
             if attempt == 2:
                 raise
             time.sleep(10)
-    output = result.get("output", [])
-    if not isinstance(output, list) or any(not isinstance(item, dict) for item in output):
-        raise RuntimeError("Malformed Foundry response: probe output must be an array of objects")
-    text_parts = []
-    for item in output:
-        if item.get("type") != "message":
-            continue
-        contents = item.get("content", [])
-        if not isinstance(contents, list) or any(not isinstance(part, dict) for part in contents):
-            raise RuntimeError("Malformed Foundry response: probe content must be an array of objects")
-        for part in contents:
-            if part.get("type") == "output_text":
-                if not isinstance(part.get("text"), str):
-                    raise RuntimeError("Malformed Foundry response: probe text must be a string")
-                text_parts.append(part["text"])
-    text = "".join(text_parts)
-    if result.get("status") != "completed" or text != expected:
-        raise RuntimeError("Deployment probe did not return the expected nonce and deployed version")
-    LOGGER.info("Verification passed: expected image, latest routing and running version %s", version)
+    LOGGER.info("Verification passed: active version %s, expected image, latest routing and health endpoint HTTP 200", version)
 
 
 

@@ -121,10 +121,9 @@ class FoundryAgentTests(unittest.TestCase):
         self.assertEqual(http.call_args.kwargs["timeout"], 5)
 
     def test_retry_after_honored_for_probe(self):
-        response = {"status": "completed", "output": [{"type": "message", "content": [
-            {"type": "output_text", "text": "DEPLOYMENT_OK:nonce:4"}]}]}
+        os.environ["HEALTH_CHECK_URL"] = "https://test.services.ai.azure.com/api/projects/qa/health"
         error = HTTPError("https://test", 429, "busy", {"Retry-After": "60"}, None)
-        with patch.object(agent.uuid, "uuid4", return_value=SimpleNamespace(hex="nonce")), patch.object(agent, "request", side_effect=[self.info, self.latest, error, response]), patch.object(agent.time, "sleep") as sleep:
+        with patch.object(agent, "request", side_effect=[self.info, self.latest, error, {}]), patch.object(agent.time, "sleep") as sleep:
             agent.verify_agent()
         sleep.assert_called_once_with(60)
 
@@ -139,14 +138,27 @@ class FoundryAgentTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "provisioning failed"):
                 agent.deploy_agent()
 
-    def test_verify_stateless_nonce_and_version(self):
-        response = {"status": "completed", "output": [{"type": "message", "content": [
-            {"type": "output_text", "text": "DEPLOYMENT_OK:nonce:4"}]}]}
-        with patch.object(agent.uuid, "uuid4", return_value=SimpleNamespace(hex="nonce")), patch.object(agent, "request", side_effect=[self.info, self.latest, response]) as request:
+    def test_default_verification_does_not_invoke_agent(self):
+        with patch.object(agent, "request", side_effect=[self.info, self.latest]) as request:
             agent.verify_agent()
-        payload = request.call_args.args[2]
-        self.assertFalse(payload["store"])
-        self.assertFalse(payload["stream"])
+        self.assertEqual(request.call_count, 2)
+        self.assertTrue(all(len(call.args) == 1 for call in request.call_args_list))
+
+    def test_configurable_health_url(self):
+        url = "https://test.services.ai.azure.com/api/projects/qa/health"
+        os.environ["HEALTH_CHECK_URL"] = url
+        with patch.object(agent, "request", side_effect=[self.info, self.latest, {}]) as request:
+            agent.verify_agent()
+        self.assertEqual(request.call_args.args, (url,))
+        self.assertTrue(request.call_args.kwargs["health_check"])
+
+    def test_health_url_rejects_external_token_destination(self):
+        for url in ("https://evil.example/health", "http://test.services.ai.azure.com/api/projects/qa/health",
+                    "https://test.services.ai.azure.com/api/projects/other/health"):
+            with self.subTest(url=url), patch.dict(os.environ, HEALTH_CHECK_URL=url), patch.object(agent, "request", return_value=self.info) as request:
+                with self.assertRaises(ValueError):
+                    agent.verify_agent()
+                self.assertEqual(request.call_count, 1)
 
     def test_verify_wrong_image_and_newer_latest(self):
         cases = [({"status": "active", "definition": {}}, self.latest),
@@ -213,13 +225,27 @@ class FoundryAgentTests(unittest.TestCase):
                     agent.verify_agent()
                 self.assertEqual(request.call_count, 2)
 
-    def test_malformed_probe_responses_fail_cleanly(self):
-        bad_outputs = [None, [None], [{"type": "message", "content": None}],
-                       [{"type": "message", "content": [{"type": "output_text", "text": 5}]}]]
-        for output in bad_outputs:
-            with self.subTest(output=output), patch.object(agent, "request", side_effect=[self.info, self.latest, {"status": "completed", "output": output}]):
-                with self.assertRaisesRegex(RuntimeError, "Malformed Foundry response"):
-                    agent.verify_agent()
+    def test_health_response_accepts_any_body_only_on_200(self):
+        for status in (200, 202, 204):
+            response = SimpleNamespace(status=status, __enter__=None)
+            from unittest.mock import MagicMock
+            context = MagicMock()
+            context.__enter__.return_value = response
+            with self.subTest(status=status), patch.object(agent.subprocess, "check_output", return_value="token"), patch.object(agent, "urlopen", return_value=context):
+                if status == 200:
+                    self.assertEqual(agent.request("https://test", health_check=True), {})
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "HTTP 200"):
+                        agent.request("https://test", health_check=True)
+
+    def test_health_auth_failure_is_not_retried(self):
+        os.environ["HEALTH_CHECK_URL"] = "https://test.services.ai.azure.com/api/projects/qa/health"
+        error = HTTPError("https://test", 403, "denied", {}, None)
+        with patch.object(agent, "request", side_effect=[self.info, self.latest, error]) as request, patch.object(agent.time, "sleep") as sleep:
+            with self.assertRaises(HTTPError):
+                agent.verify_agent()
+        self.assertEqual(request.call_count, 3)
+        sleep.assert_not_called()
 
     def test_interrupted_read_is_retried(self):
         with patch.object(agent, "request", side_effect=[IncompleteRead(b"partial"), {}]) as request, patch.object(agent.time, "sleep"):
