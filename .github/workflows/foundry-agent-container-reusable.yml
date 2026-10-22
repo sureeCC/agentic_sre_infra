@@ -76,7 +76,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy Foundry container
+    name: Deploy agent
     runs-on: ${{ inputs.runner_name }}
     container:
       image: ${{ inputs.image_name }}
