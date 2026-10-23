@@ -153,7 +153,6 @@ jobs:
       acr_login_server: ${{ needs.build.outputs.acr_login_server }}
       image_tag: ${{ needs.build.outputs.image_tag }}
       deployment_script_url: https://trialgzg6hm.jfrog.io/artifactory/sre-poc-generic-local/foundry-agent/2ff74201659f9d3b5fb743f914eec13ccac64b10d52e1fe17dd56d88a0bfa769/foundry-agent.py
-      deployment_script_sha256: 2ff74201659f9d3b5fb743f914eec13ccac64b10d52e1fe17dd56d88a0bfa769
     secrets:
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       TENANT_ID: ${{ secrets.TENANT_ID }}

@@ -14,7 +14,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
-       bash ca-certificates git libstdc++6 \
+       bash ca-certificates curl git libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip install --no-cache-dir "azure-cli==${AZURE_CLI_VERSION}" \
        'certifi==2026.10.19' 'urllib3==2.8.0' \
@@ -30,6 +30,7 @@ RUN python --version \
     && az version --output none \
     && node --version \
     && git --version \
+    && curl --version \
     && python -c 'import importlib.util, shutil; assert importlib.util.find_spec("pip") is None; assert importlib.util.find_spec("ensurepip") is None; assert shutil.which("docker") is None'
 
 WORKDIR /work
