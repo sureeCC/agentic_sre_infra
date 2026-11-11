@@ -138,4 +138,14 @@ jobs:
           if properties.get("category") != "CustomKeys" or properties.get("authType") != "CustomKeys":
               sys.exit("Foundry did not return the expected Custom Keys connection type.")
           print(f"Verified Foundry connection {name} (CustomKeys) with {len(keys)} secret-backed keys.")
+          references = [(key, "$" + "{{connections." + name + ".credentials." + key + "}}")
+                        for key in keys]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              print("## Foundry environment variables\n\n| Key | Value |\n|---|---|", file=summary)
+              for key, reference in references:
+                  print(f"| `{key}` | `{reference}` |", file=summary)
+              print("\n```dotenv", file=summary)
+              for key, reference in references:
+                  print(f"{key}={reference}", file=summary)
+              print("```", file=summary)
           PY
