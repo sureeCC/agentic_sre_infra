@@ -1,0 +1,144 @@
+name: Configure Foundry connection
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment with Azure OIDC configuration
+        type: environment
+        required: true
+      project_resource_id:
+        description: ARM resource ID of the Foundry project
+        type: string
+        required: true
+      connection_name:
+        description: Foundry connection name (creates or updates)
+        type: string
+        required: true
+      target:
+        description: Non-secret HTTPS or sb service URL
+        type: string
+        required: true
+      connection_type:
+        description: Foundry connection category
+        type: choice
+        required: true
+        default: CustomKeys
+        options:
+          - CustomKeys
+          - ApiKey
+      credential_field:
+        description: Custom Keys field name (ignored for ApiKey)
+        type: string
+        default: connectionString
+      secret_name:
+        description: GitHub Actions secret name starting with FOUNDRY_CONNECTION_
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  configure:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+    steps:
+      - name: Sign in to Azure using OIDC
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+        with:
+          client-id: ${{ secrets.CLIENT_ID || vars.CLIENT_ID }}
+          tenant-id: ${{ secrets.TENANT_ID || vars.TENANT_ID }}
+          subscription-id: ${{ secrets.SUBSCRIPTION || vars.SUBSCRIPTION }}
+
+      - name: Save and verify the Foundry connection
+        env:
+          PROJECT_ID: ${{ inputs.project_resource_id }}
+          CONNECTION_NAME: ${{ inputs.connection_name }}
+          CONNECTION_TYPE: ${{ inputs.connection_type }}
+          CONNECTION_TARGET: ${{ inputs.target }}
+          CREDENTIAL_FIELD: ${{ inputs.credential_field }}
+          SECRET_NAME: ${{ inputs.secret_name }}
+          CONNECTION_SECRET: ${{ startsWith(inputs.secret_name, 'FOUNDRY_CONNECTION_') && secrets[inputs.secret_name] || '' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          secret = os.environ.pop("CONNECTION_SECRET", "")
+          if not re.fullmatch(r"FOUNDRY_CONNECTION_[A-Z0-9_]+", os.environ["SECRET_NAME"]):
+              sys.exit("Use an uppercase secret name starting with FOUNDRY_CONNECTION_.")
+          if not secret:
+              sys.exit("The selected GitHub Actions secret is missing or empty.")
+
+          project_id = os.environ["PROJECT_ID"].strip()
+          project = re.fullmatch(
+              r"/subscriptions/([0-9a-f-]{36})/resourceGroups/[\w.()-]+"
+              r"/providers/Microsoft\.CognitiveServices/accounts/[\w-]+/projects/[\w-]+",
+              project_id, re.IGNORECASE | re.ASCII,
+          )
+          name = os.environ["CONNECTION_NAME"]
+          if not project or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
+              sys.exit("Provide a valid project ARM ID and connection name.")
+
+          target = os.environ["CONNECTION_TARGET"].strip()
+          try:
+              parsed = urllib.parse.urlsplit(target)
+          except ValueError:
+              sys.exit("Invalid connection target.")
+          if (parsed.scheme not in {"https", "sb"} or not parsed.hostname
+                  or parsed.username is not None or parsed.password is not None
+                  or parsed.query or parsed.fragment or re.search(r"\s", target)):
+              sys.exit("Use a non-secret HTTPS or sb URL without credentials, query, or fragment.")
+
+          category = os.environ["CONNECTION_TYPE"]
+          field = os.environ["CREDENTIAL_FIELD"]
+          if category == "CustomKeys" and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field):
+              credentials = {"keys": {field: secret}}
+          elif category == "ApiKey":
+              credentials = {"key": secret}
+          else:
+              sys.exit("Invalid connection type or Custom Keys field name.")
+
+          token = subprocess.run(
+              ["az", "account", "get-access-token", "--subscription", project[1],
+               "--resource", "https://management.azure.com/", "--query", "accessToken", "-o", "tsv"],
+              capture_output=True, text=True, check=False,
+          )
+          if token.returncode or not token.stdout.strip():
+              sys.exit("Could not acquire an ARM token for the target subscription.")
+
+          url = f"https://management.azure.com{project_id}/connections/{name}?api-version=2025-06-01"
+          headers = {"Authorization": f"Bearer {token.stdout.strip()}", "Content-Type": "application/json"}
+          body = json.dumps({"properties": {
+              "category": category, "authType": category, "target": target,
+              "credentials": credentials, "isSharedToAll": False,
+          }}).encode()
+
+          def request(method, data=None):
+              try:
+                  with urllib.request.urlopen(
+                      urllib.request.Request(url, data=data, headers=headers, method=method),
+                      timeout=60,
+                  ) as response:
+                      return json.load(response) if method == "GET" else None
+              except urllib.error.HTTPError as error:
+                  request_id = error.headers.get("x-ms-request-id", "unavailable")
+                  sys.exit(f"Foundry connection {method} failed with HTTP {error.code} (request ID {request_id}).")
+              except (urllib.error.URLError, TimeoutError, ValueError):
+                  sys.exit(f"Foundry connection {method} failed before a usable response was received.")
+
+          request("PUT", body)
+          properties = request("GET").get("properties", {})
+          if properties.get("category") != category or properties.get("authType") != category:
+              sys.exit("The saved connection category or authentication type did not match.")
+          print(f"Verified Foundry connection {name} ({category}).")
+          PY
