@@ -15,24 +15,17 @@ on:
         description: Foundry connection name (creates or updates)
         type: string
         required: true
-      target:
-        description: Non-secret HTTPS or sb service URL
+      key_count:
+        description: Number of keys (1 to 3)
+        type: number
+        required: true
+        default: 1
+      key_names:
+        description: Comma-separated Foundry key names
         type: string
         required: true
-      connection_type:
-        description: Foundry connection category
-        type: choice
-        required: true
-        default: CustomKeys
-        options:
-          - CustomKeys
-          - ApiKey
-      credential_field:
-        description: Custom Keys field name (ignored for ApiKey)
-        type: string
-        default: connectionString
-      secret_name:
-        description: GitHub Actions secret name starting with FOUNDRY_CONNECTION_
+      secret_names:
+        description: Comma-separated GitHub secret names in matching order
         type: string
         required: true
 
@@ -46,6 +39,32 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - name: Validate key and secret names
+        id: keys
+        env:
+          KEY_COUNT: ${{ inputs.key_count }}
+          KEY_NAMES: ${{ inputs.key_names }}
+          SECRET_NAMES: ${{ inputs.secret_names }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+
+          count = os.environ["KEY_COUNT"]
+          keys = [value.strip() for value in os.environ["KEY_NAMES"].split(",")]
+          secrets = [value.strip().upper() for value in os.environ["SECRET_NAMES"].split(",")]
+          if count not in {"1", "2", "3"} or len(keys) != int(count) or len(secrets) != int(count):
+              sys.exit("Enter 1 to 3 keys and the same number of key and secret names.")
+          if len(set(keys)) != len(keys) or any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) for key in keys):
+              sys.exit("Foundry key names must be valid identifiers and unique.")
+          if any(not re.fullmatch(r"FOUNDRY_CONNECTION_[A-Z0-9_]+", secret) for secret in secrets):
+              sys.exit("Each GitHub secret name must start with FOUNDRY_CONNECTION_.")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for index, secret in enumerate(secrets, 1):
+                  print(f"secret_{index}={secret}", file=output)
+          PY
+
       - name: Sign in to Azure using OIDC
         uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
@@ -57,11 +76,10 @@ jobs:
         env:
           PROJECT_ID: ${{ inputs.project_resource_id }}
           CONNECTION_NAME: ${{ inputs.connection_name }}
-          CONNECTION_TYPE: ${{ inputs.connection_type }}
-          CONNECTION_TARGET: ${{ inputs.target }}
-          CREDENTIAL_FIELD: ${{ inputs.credential_field }}
-          SECRET_NAME: ${{ inputs.secret_name }}
-          CONNECTION_SECRET: ${{ startsWith(inputs.secret_name, 'FOUNDRY_CONNECTION_') && secrets[inputs.secret_name] || '' }}
+          KEY_NAMES: ${{ inputs.key_names }}
+          CONNECTION_SECRET_1: ${{ steps.keys.outputs.secret_1 && secrets[steps.keys.outputs.secret_1] || '' }}
+          CONNECTION_SECRET_2: ${{ steps.keys.outputs.secret_2 && secrets[steps.keys.outputs.secret_2] || '' }}
+          CONNECTION_SECRET_3: ${{ steps.keys.outputs.secret_3 && secrets[steps.keys.outputs.secret_3] || '' }}
         run: |
           python - <<'PY'
           import json
@@ -70,14 +88,12 @@ jobs:
           import subprocess
           import sys
           import urllib.error
-          import urllib.parse
           import urllib.request
 
-          secret = os.environ.pop("CONNECTION_SECRET", "")
-          if not re.fullmatch(r"FOUNDRY_CONNECTION_[A-Z0-9_]+", os.environ["SECRET_NAME"]):
-              sys.exit("Use an uppercase secret name starting with FOUNDRY_CONNECTION_.")
-          if not secret:
-              sys.exit("The selected GitHub Actions secret is missing or empty.")
+          keys = [value.strip() for value in os.environ["KEY_NAMES"].split(",")]
+          values = [os.environ.pop(f"CONNECTION_SECRET_{index}", "") for index in range(1, 4)]
+          if any(not value for value in values[:len(keys)]):
+              sys.exit("At least one selected GitHub Actions secret is missing or empty.")
 
           project_id = os.environ["PROJECT_ID"].strip()
           project = re.fullmatch(
@@ -88,25 +104,6 @@ jobs:
           name = os.environ["CONNECTION_NAME"]
           if not project or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
               sys.exit("Provide a valid project ARM ID and connection name.")
-
-          target = os.environ["CONNECTION_TARGET"].strip()
-          try:
-              parsed = urllib.parse.urlsplit(target)
-          except ValueError:
-              sys.exit("Invalid connection target.")
-          if (parsed.scheme not in {"https", "sb"} or not parsed.hostname
-                  or parsed.username is not None or parsed.password is not None
-                  or parsed.query or parsed.fragment or re.search(r"\s", target)):
-              sys.exit("Use a non-secret HTTPS or sb URL without credentials, query, or fragment.")
-
-          category = os.environ["CONNECTION_TYPE"]
-          field = os.environ["CREDENTIAL_FIELD"]
-          if category == "CustomKeys" and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field):
-              credentials = {"keys": {field: secret}}
-          elif category == "ApiKey":
-              credentials = {"key": secret}
-          else:
-              sys.exit("Invalid connection type or Custom Keys field name.")
 
           token = subprocess.run(
               ["az", "account", "get-access-token", "--subscription", project[1],
@@ -119,8 +116,8 @@ jobs:
           url = f"https://management.azure.com{project_id}/connections/{name}?api-version=2025-06-01"
           headers = {"Authorization": f"Bearer {token.stdout.strip()}", "Content-Type": "application/json"}
           body = json.dumps({"properties": {
-              "category": category, "authType": category, "target": target,
-              "credentials": credentials, "isSharedToAll": False,
+              "category": "CustomKeys", "authType": "CustomKeys",
+              "credentials": {"keys": dict(zip(keys, values))}, "isSharedToAll": False,
           }}).encode()
 
           def request(method, data=None):
@@ -138,7 +135,7 @@ jobs:
 
           request("PUT", body)
           properties = request("GET").get("properties", {})
-          if properties.get("category") != category or properties.get("authType") != category:
-              sys.exit("The saved connection category or authentication type did not match.")
-          print(f"Verified Foundry connection {name} ({category}).")
+          if properties.get("category") != "CustomKeys" or properties.get("authType") != "CustomKeys":
+              sys.exit("Foundry did not return the expected Custom Keys connection type.")
+          print(f"Verified Foundry connection {name} (CustomKeys) with {len(keys)} secret-backed keys.")
           PY
